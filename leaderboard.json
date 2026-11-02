@@ -1,0 +1,26 @@
+[
+    {
+        "name": "amir2",
+        "time": 25,
+        "moves": 17,
+        "size": 4
+    },
+    {
+        "name": "amir",
+        "time": 36,
+        "moves": 21,
+        "size": 4
+    },
+    {
+        "name": "ilya",
+        "time": 45,
+        "moves": 25,
+        "size": 4
+    },
+    {
+        "name": "roya",
+        "time": 51,
+        "moves": 19,
+        "size": 4
+    }
+]
