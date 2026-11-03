@@ -28,10 +28,19 @@ YELLOW = (240, 190, 50)
 PURPLE = (130, 80, 200)
 
 font = pygame.font.SysFont("segoeuiemoji", 30)
-small_font = pygame.font.SysFont("segoeuiemoji", 22)
+small_font = pygame.font.SysFont("segoeuiemoji", 20)
 title_font = pygame.font.SysFont("segoeuiemoji", 55)
 
 LEADERBOARD_FILE = "leaderboard.json"
+
+# ---------------- DIFFICULTY ----------------
+
+DIFFICULTIES = {
+    4: {"name": "Easy", "time": 90},
+    6: {"name": "Medium", "time": 150},
+    8: {"name": "Hard", "time": 240},
+    10: {"name": "Expert", "time": 360}
+}
 
 # ---------------- SOUND ----------------
 
@@ -77,8 +86,11 @@ def load_leaderboard():
 
     try:
         with open(LEADERBOARD_FILE, "r", encoding="utf-8") as file:
-            return json.load(file)
-    except:
+            data = json.load(file)
+
+        return data if isinstance(data, list) else []
+
+    except (json.JSONDecodeError, OSError):
         return []
 
 
@@ -97,8 +109,9 @@ def add_record(name, elapsed, moves, size):
         "size": size
     })
 
-    # زمان کمتر، رتبه بهتر؛ در زمان برابر، حرکت کمتر
-    records.sort(key=lambda x: (x["time"], x["moves"]))
+    records.sort(
+        key=lambda record: (record["size"], record["time"], record["moves"])
+    )
 
     save_leaderboard(records)
 
@@ -131,24 +144,26 @@ def draw_button(text, rect, color=BLUE):
 
 def get_input(prompt):
     name = ""
-    active = True
 
-    while active:
+    while True:
         screen.fill(BLACK)
 
         draw_text(prompt, title_font, WHITE, WIDTH // 2, 250)
         draw_text(name + "|", font, YELLOW, WIDTH // 2, 370)
-        draw_text("ENTER = Continue", small_font, WHITE, WIDTH // 2, 450)
+        draw_text("ENTER = Continue | ESC = Back",
+                  small_font, WHITE, WIDTH // 2, 450)
 
         pygame.display.flip()
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                pygame.quit()
-                raise SystemExit
+                return None
 
             if event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_RETURN:
+                if event.key == pygame.K_ESCAPE:
+                    return ""
+
+                elif event.key == pygame.K_RETURN:
                     if name.strip():
                         return name.strip()
 
@@ -165,34 +180,40 @@ def get_input(prompt):
 # ---------------- MAIN MENU ----------------
 
 def main_menu():
+    buttons = [
+        ("4 x 4  EASY", pygame.Rect(100, 300, 300, 65), 4),
+        ("6 x 6  MEDIUM", pygame.Rect(500, 300, 300, 65), 6),
+        ("8 x 8  HARD", pygame.Rect(100, 400, 300, 65), 8),
+        ("10 x 10  EXPERT", pygame.Rect(500, 400, 300, 65), 10)
+    ]
+
+    leaderboard_button = pygame.Rect(250, 520, 180, 65)
+    exit_button = pygame.Rect(470, 520, 180, 65)
+
     while True:
         screen.fill(BLACK)
 
-        draw_text("MEMORY MATCH", title_font, YELLOW, WIDTH // 2, 150)
-        draw_text("Choose your difficulty", font, WHITE, WIDTH // 2, 250)
+        draw_text("MEMORY MATCH", title_font, YELLOW,
+                  WIDTH // 2, 130)
 
-        buttons = [
-            ("4 x 4", pygame.Rect(120, 320, 140, 65), 4),
-            ("6 x 6", pygame.Rect(290, 320, 140, 65), 6),
-            ("8 x 8", pygame.Rect(460, 320, 140, 65), 8),
-            ("10 x 10", pygame.Rect(630, 320, 140, 65), 10)
-        ]
+        draw_text("Choose your difficulty",
+                  font, WHITE, WIDTH // 2, 220)
 
         for text, rect, size in buttons:
             draw_button(text, rect)
 
-        leaderboard_button = pygame.Rect(300, 450, 300, 65)
         draw_button("LEADERBOARD", leaderboard_button, PURPLE)
-
-        draw_text("60 seconds challenge!", small_font, YELLOW,
-                  WIDTH // 2, 560)
+        draw_button("EXIT", exit_button, RED)
 
         pygame.display.flip()
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                pygame.quit()
-                raise SystemExit
+                return "exit"
+
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    return "exit"
 
             if event.type == pygame.MOUSEBUTTONDOWN:
                 for text, rect, size in buttons:
@@ -202,6 +223,11 @@ def main_menu():
                 if leaderboard_button.collidepoint(event.pos):
                     show_leaderboard()
 
+                if exit_button.collidepoint(event.pos):
+                    return "exit"
+
+        clock.tick(30)
+
 
 # ---------------- LEADERBOARD SCREEN ----------------
 
@@ -210,40 +236,82 @@ def show_leaderboard():
         screen.fill(BLACK)
 
         draw_text("LEADERBOARD", title_font, YELLOW,
-                  WIDTH // 2, 90)
+                  WIDTH // 2, 65)
 
         records = load_leaderboard()
 
-        draw_text(
-            "RANK       NAME             TIME       MOVES       SIZE",
-            small_font,
-            WHITE,
-            WIDTH // 2,
-            190
-        )
+        y = 125
 
-        if not records:
-            draw_text("No records yet!", font, GRAY,
-                      WIDTH // 2, 350)
+        for size, info in DIFFICULTIES.items():
 
-        else:
-            for index, record in enumerate(records[:12]):
-                y = 240 + index * 40
+            draw_text(
+                f"{info['name']}  ({size}x{size})",
+                font,
+                YELLOW,
+                40,
+                y,
+                False
+            )
 
-                line = (
-                    f"{index + 1}.          "
-                    f"{record['name'][:14]:14} "
-                    f"{record['time']}s          "
-                    f"{record['moves']}          "
-                    f"{record['size']}x{record['size']}"
+            y += 35
+
+            category_records = [
+                record for record in records
+                if record.get("size") == size
+            ]
+
+            category_records.sort(
+                key=lambda record: (
+                    record.get("time", 999999),
+                    record.get("moves", 999999)
                 )
+            )
 
-                color = YELLOW if index == 0 else WHITE
+            if not category_records:
+                draw_text(
+                    "No records yet!",
+                    small_font,
+                    GRAY,
+                    55,
+                    y,
+                    False
+                )
+                y += 30
 
-                draw_text(line, small_font, color,
-                          WIDTH // 2, y)
+            else:
+                draw_text(
+                    "Rank     Player                 Time       Moves",
+                    small_font,
+                    WHITE,
+                    55,
+                    y,
+                    False
+                )
+                y += 28
 
-        back_button = pygame.Rect(330, 700, 240, 60)
+                for index, record in enumerate(category_records[:3]):
+
+                    line = (
+                        f"{index + 1}.          "
+                        f"{record.get('name', 'Unknown')[:16]:16} "
+                        f"{record.get('time', 0)}s          "
+                        f"{record.get('moves', 0)}"
+                    )
+
+                    draw_text(
+                        line,
+                        small_font,
+                        GREEN if index == 0 else WHITE,
+                        55,
+                        y,
+                        False
+                    )
+
+                    y += 27
+
+            y += 12
+
+        back_button = pygame.Rect(330, 730, 240, 55)
         draw_button("BACK", back_button, RED)
 
         pygame.display.flip()
@@ -253,9 +321,15 @@ def show_leaderboard():
                 pygame.quit()
                 raise SystemExit
 
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    return
+
             if event.type == pygame.MOUSEBUTTONDOWN:
                 if back_button.collidepoint(event.pos):
                     return
+
+        clock.tick(30)
 
 
 # ---------------- GAME ----------------
@@ -286,14 +360,10 @@ def start_game(size, player_name):
     moves = 0
     start_time = time.time()
 
-    game_over = False
-    result = None
+    time_limit = DIFFICULTIES[size]["time"]
 
-    margin = 20
-    top_space = 130
-
-    available_width = WIDTH - margin * 2
-    available_height = HEIGHT - top_space - margin
+    available_width = WIDTH - 40
+    available_height = HEIGHT - 150
 
     card_size = min(
         available_width // size,
@@ -304,7 +374,7 @@ def start_game(size, player_name):
     grid_height = card_size * size
 
     start_x = (WIDTH - grid_width) // 2
-    start_y = top_space + (available_height - grid_height) // 2
+    start_y = 130 + (available_height - grid_height) // 2
 
     last_open_time = 0
 
@@ -313,7 +383,7 @@ def start_game(size, player_name):
         screen.fill(BLACK)
 
         elapsed = int(time.time() - start_time)
-        remaining = max(0, 60 - elapsed)
+        remaining = max(0, time_limit - elapsed)
 
         draw_text(
             f"Player: {player_name}",
@@ -341,8 +411,6 @@ def start_game(size, player_name):
             False
         )
 
-        # کارت ها
-
         for index, card in enumerate(cards):
 
             row = index // size
@@ -360,10 +428,8 @@ def start_game(size, player_name):
 
             if index in matched:
                 color = GREEN
-
             elif index in opened:
                 color = BLUE
-
             else:
                 color = GRAY
 
@@ -386,7 +452,7 @@ def start_game(size, player_name):
 
                 emoji_font = pygame.font.SysFont(
                     "segoeuiemoji",
-                    max(16, min(45, card_size // 2))
+                    max(12, min(45, card_size // 2))
                 )
 
                 draw_text(
@@ -399,19 +465,19 @@ def start_game(size, player_name):
 
         pygame.display.flip()
 
-        # بررسی برنده شدن
+        # WIN CHECK
 
         if len(matched) == len(cards):
             result = "win"
             break
 
-        # پایان زمان
+        # TIME CHECK
 
         if remaining <= 0:
             result = "lose"
             break
 
-        # برگرداندن کارت های اشتباه
+        # HIDE WRONG CARDS
 
         if len(opened) == 2:
             if time.time() - last_open_time >= 0.8:
@@ -425,11 +491,14 @@ def start_game(size, player_name):
 
             if event.type == pygame.KEYDOWN:
 
+                if event.key == pygame.K_ESCAPE:
+                    return "menu"
+
                 if event.key == pygame.K_r:
                     return "restart"
 
-                if event.key == pygame.K_m:
-                    return "menu"
+                if event.key == pygame.K_q:
+                    return "exit"
 
             if event.type == pygame.MOUSEBUTTONDOWN:
 
@@ -469,7 +538,7 @@ def start_game(size, player_name):
 
         clock.tick(60)
 
-    # ---------------- RESULT ----------------
+    # ---------------- SAVE RESULT ----------------
 
     if result == "win":
 
@@ -492,7 +561,7 @@ def start_game(size, player_name):
 
 # ---------------- RESULT SCREEN ----------------
 
-def result_screen(result, player_name):
+def result_screen(result, player_name, size, moves, elapsed):
 
     while True:
 
@@ -508,25 +577,36 @@ def result_screen(result, player_name):
                 180
             )
 
-            records = load_leaderboard()
-
             draw_text(
                 f"Congratulations {player_name}!",
                 font,
                 YELLOW,
                 WIDTH // 2,
-                280
+                270
             )
 
-            if records:
-                record = records[-1] if False else None
+            draw_text(
+                f"Time: {elapsed} seconds",
+                small_font,
+                WHITE,
+                WIDTH // 2,
+                340
+            )
+
+            draw_text(
+                f"Moves: {moves}",
+                small_font,
+                WHITE,
+                WIDTH // 2,
+                380
+            )
 
             draw_text(
                 "Your record has been saved!",
                 small_font,
-                WHITE,
+                GREEN,
                 WIDTH // 2,
-                350
+                430
             )
 
         else:
@@ -555,8 +635,8 @@ def result_screen(result, player_name):
                 370
             )
 
-        restart_button = pygame.Rect(180, 500, 220, 65)
-        menu_button = pygame.Rect(500, 500, 220, 65)
+        restart_button = pygame.Rect(180, 540, 220, 65)
+        menu_button = pygame.Rect(500, 540, 220, 65)
 
         draw_button("PLAY AGAIN", restart_button, GREEN)
         draw_button("MAIN MENU", menu_button, BLUE)
@@ -568,6 +648,10 @@ def result_screen(result, player_name):
             if event.type == pygame.QUIT:
                 pygame.quit()
                 raise SystemExit
+
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    return "menu"
 
             if event.type == pygame.MOUSEBUTTONDOWN:
 
@@ -588,11 +672,24 @@ def main():
 
         size = main_menu()
 
+        if size == "exit":
+            break
+
         player_name = get_input("Enter your name")
+
+        if player_name is None:
+            break
+
+        if player_name == "":
+            continue
 
         while True:
 
             result = start_game(size, player_name)
+
+            if result == "exit":
+                pygame.quit()
+                return
 
             if result == "menu":
                 break
@@ -600,12 +697,38 @@ def main():
             if result == "restart":
                 continue
 
-            next_action = result_screen(result, player_name)
+            # Read final game statistics from the saved record
+            records = load_leaderboard()
+            latest = next(
+                (
+                    record for record in reversed(records)
+                    if record.get("name") == player_name
+                    and record.get("size") == size
+                ),
+                None
+            )
+
+            if result == "win" and latest:
+                elapsed = latest["time"]
+                moves = latest["moves"]
+            else:
+                elapsed = DIFFICULTIES[size]["time"]
+                moves = 0
+
+            next_action = result_screen(
+                result,
+                player_name,
+                size,
+                moves,
+                elapsed
+            )
 
             if next_action == "restart":
                 continue
 
             break
+
+    pygame.quit()
 
 
 main()
