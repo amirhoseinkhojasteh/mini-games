@@ -50,12 +50,15 @@ DIFFICULTIES = {
 # ---------------- SOUND SYSTEM ----------------
 
 sound_enabled = False
+
 music_channel = None
+sfx_channel = None
+
+SAMPLE_RATE = 22050
 
 
 def create_sound(frequency, duration=0.15, volume=0.2):
-    sample_rate = 22050
-    samples = int(sample_rate * duration)
+    samples = int(SAMPLE_RATE * duration)
     buffer = bytearray()
 
     for i in range(samples):
@@ -65,7 +68,9 @@ def create_sound(frequency, duration=0.15, volume=0.2):
             12000
             * volume
             * fade
-            * math.sin(2 * math.pi * frequency * i / sample_rate)
+            * math.sin(
+                2 * math.pi * frequency * i / SAMPLE_RATE
+            )
         )
 
         buffer.extend(struct.pack("<h", value))
@@ -73,73 +78,189 @@ def create_sound(frequency, duration=0.15, volume=0.2):
     return pygame.mixer.Sound(buffer=bytes(buffer))
 
 
-def create_music():
-    # A small original looping melody, generated without external files.
-    sample_rate = 22050
-    notes = [
-        523, 659, 784, 659,
-        587, 698, 880, 698,
-        523, 659, 784, 1046,
-        880, 784, 659, 587
-    ]
-
-    note_duration = 0.22
+def create_music(notes, bpm=90, duration=8, volume=0.12):
     audio = array.array("h")
 
-    for frequency in notes:
-        count = int(sample_rate * note_duration)
+    beat_duration = 60 / bpm
+    total_samples = int(SAMPLE_RATE * duration)
 
-        for i in range(count):
-            fade = min(1, i / 500, (count - i) / 700)
+    for i in range(total_samples):
 
-            value = int(
-                2500
-                * fade
-                * math.sin(
-                    2 * math.pi * frequency * i / sample_rate
-                )
-            )
+        current_time = i / SAMPLE_RATE
 
-            audio.append(value)
+        beat = int(current_time / beat_duration)
+        local_time = current_time % beat_duration
+
+        frequency = notes[beat % len(notes)]
+
+        if frequency == 0:
+            audio.append(0)
+            continue
+
+        fade = min(1, local_time * 7)
+        fade *= min(1, (beat_duration - local_time) * 5)
+
+        main_wave = math.sin(
+            2 * math.pi * frequency * current_time
+        )
+
+        second_wave = math.sin(
+            2 * math.pi * frequency * 2 * current_time
+        )
+
+        third_wave = math.sin(
+            2 * math.pi * frequency * 0.5 * current_time
+        )
+
+        value = (
+            main_wave * 0.7
+            + second_wave * 0.15
+            + third_wave * 0.15
+        )
+
+        value *= fade * volume
+
+        audio.append(
+            max(-32767, min(32767, int(value * 16000)))
+        )
 
     return pygame.mixer.Sound(buffer=audio.tobytes())
 
 
-try:
-    pygame.mixer.init(frequency=22050, size=-16, channels=1)
+def initialize_audio():
 
-    click_sound = create_sound(500, 0.08)
-    match_sound = create_sound(850, 0.18)
-    win_sound = create_sound(1000, 0.35)
-    lose_sound = create_sound(220, 0.35)
+    global sound_enabled
+    global music_channel
+    global sfx_channel
 
-    background_music = create_music()
-    background_music.set_volume(0.12)
+    try:
+        if not pygame.mixer.get_init():
+            pygame.mixer.init(
+                frequency=SAMPLE_RATE,
+                size=-16,
+                channels=1
+            )
 
-    sound_enabled = True
+        pygame.mixer.set_num_channels(8)
 
-except pygame.error:
-    sound_enabled = False
+        music_channel = pygame.mixer.Channel(0)
+        sfx_channel = pygame.mixer.Channel(1)
+
+        # MENU MUSIC - آرام و ملایم
+        menu_music = create_music(
+            [261, 329, 392, 329, 293, 349, 392, 349],
+            bpm=65,
+            duration=8,
+            volume=0.10
+        )
+
+        # EASY MUSIC - آرام
+        easy_music = create_music(
+            [261, 293, 329, 293, 261, 329, 349, 329],
+            bpm=75,
+            duration=8,
+            volume=0.11
+        )
+
+        # MEDIUM MUSIC - کمی هیجانی‌تر
+        medium_music = create_music(
+            [329, 392, 440, 392, 349, 440, 494, 440],
+            bpm=100,
+            duration=8,
+            volume=0.12
+        )
+
+        # HARD MUSIC - هیجانی
+        hard_music = create_music(
+            [392, 440, 494, 523, 494, 440, 523, 587],
+            bpm=125,
+            duration=8,
+            volume=0.14
+        )
+
+        # EXPERT MUSIC - بسیار پرانرژی
+        expert_music = create_music(
+            [440, 523, 587, 659, 587, 659, 784, 659],
+            bpm=155,
+            duration=8,
+            volume=0.16
+        )
+
+        # GAME EFFECTS
+        click_sound = create_sound(500, 0.08, 0.2)
+        match_sound = create_sound(850, 0.18, 0.3)
+
+        # VICTORY EFFECT
+        win_sound = create_music(
+            [523, 659, 784, 1046, 784, 1046],
+            bpm=180,
+            duration=1.5,
+            volume=0.35
+        )
+
+        # GAME OVER EFFECT
+        lose_sound = create_music(
+            [392, 349, 293, 261, 220, 196],
+            bpm=100,
+            duration=1.8,
+            volume=0.3
+        )
+
+        global audio_sounds
+
+        audio_sounds = {
+            "menu": menu_music,
+            "easy": easy_music,
+            "medium": medium_music,
+            "hard": hard_music,
+            "expert": expert_music,
+            "click": click_sound,
+            "match": match_sound,
+            "win": win_sound,
+            "lose": lose_sound
+        }
+
+        sound_enabled = True
+
+    except pygame.error as error:
+        print("Audio initialization failed:", error)
+        sound_enabled = False
 
 
-def play_sound(sound):
-    if sound_enabled:
-        sound.play()
+def play_music(name):
 
+    if not sound_enabled:
+        return
 
-def play_music():
-    if sound_enabled and not pygame.mixer.get_busy():
-        background_music.play(-1)
+    music_channel.stop()
+
+    music_channel.play(
+        audio_sounds[name],
+        loops=-1
+    )
 
 
 def stop_music():
+
     if sound_enabled:
-        pygame.mixer.stop()
+        music_channel.fadeout(300)
+
+
+def play_sound(name):
+
+    if not sound_enabled:
+        return
+
+    sfx_channel.play(audio_sounds[name])
+
+
+initialize_audio()
 
 
 # ---------------- DRAWING HELPERS ----------------
 
 def draw_text(text, font_obj, color, x, y, center=True):
+
     image = font_obj.render(str(text), True, color)
 
     if center:
@@ -151,6 +272,7 @@ def draw_text(text, font_obj, color, x, y, center=True):
 
 
 def draw_panel(rect, color=PANEL, radius=20):
+
     pygame.draw.rect(
         screen,
         color,
@@ -160,6 +282,7 @@ def draw_panel(rect, color=PANEL, radius=20):
 
 
 def draw_button(text, rect, color=BLUE, hover_color=CARD_HOVER):
+
     mouse = pygame.mouse.get_pos()
     hovered = rect.collidepoint(mouse)
 
@@ -190,20 +313,38 @@ def draw_button(text, rect, color=BLUE, hover_color=CARD_HOVER):
 
 
 def draw_background():
+
     screen.fill(BG)
 
-    pygame.draw.circle(screen, (25, 34, 65), (40, 50), 170)
-    pygame.draw.circle(screen, (30, 25, 65), (850, 740), 200)
+    pygame.draw.circle(
+        screen,
+        (25, 34, 65),
+        (40, 50),
+        170
+    )
+
+    pygame.draw.circle(
+        screen,
+        (30, 25, 65),
+        (850, 740),
+        200
+    )
 
 
 # ---------------- LEADERBOARD ----------------
 
 def load_leaderboard():
+
     if not os.path.exists(LEADERBOARD_FILE):
         return []
 
     try:
-        with open(LEADERBOARD_FILE, "r", encoding="utf-8") as file:
+        with open(
+            LEADERBOARD_FILE,
+            "r",
+            encoding="utf-8"
+        ) as file:
+
             data = json.load(file)
 
         return data if isinstance(data, list) else []
@@ -213,11 +354,23 @@ def load_leaderboard():
 
 
 def save_leaderboard(records):
-    with open(LEADERBOARD_FILE, "w", encoding="utf-8") as file:
-        json.dump(records, file, ensure_ascii=False, indent=4)
+
+    with open(
+        LEADERBOARD_FILE,
+        "w",
+        encoding="utf-8"
+    ) as file:
+
+        json.dump(
+            records,
+            file,
+            ensure_ascii=False,
+            indent=4
+        )
 
 
 def add_record(name, elapsed, moves, size):
+
     records = load_leaderboard()
 
     records.append({
@@ -233,16 +386,28 @@ def add_record(name, elapsed, moves, size):
 # ---------------- PLAYER NAME ----------------
 
 def get_input(prompt):
+
     name = ""
 
     while True:
+
         draw_background()
 
-        draw_panel(pygame.Rect(180, 220, 540, 350))
+        draw_panel(
+            pygame.Rect(180, 220, 540, 350)
+        )
 
-        draw_text(prompt, title_font, WHITE, WIDTH // 2, 300)
+        draw_text(
+            prompt,
+            title_font,
+            WHITE,
+            WIDTH // 2,
+            300
+        )
 
-        input_rect = pygame.Rect(270, 370, 360, 65)
+        input_rect = pygame.Rect(
+            270, 370, 360, 65
+        )
 
         pygame.draw.rect(
             screen,
@@ -280,6 +445,7 @@ def get_input(prompt):
                     return ""
 
                 elif event.key == pygame.K_RETURN:
+
                     if name.strip():
                         return name.strip()
 
@@ -287,6 +453,7 @@ def get_input(prompt):
                     name = name[:-1]
 
                 elif len(name) < 18:
+
                     if event.unicode.isprintable():
                         name += event.unicode
 
@@ -297,15 +464,29 @@ def get_input(prompt):
 
 def main_menu():
 
+    play_music("menu")
+
     buttons = [
-        ("4 x 4", "EASY", 90, 4, pygame.Rect(115, 300, 300, 85)),
-        ("6 x 6", "MEDIUM", 150, 6, pygame.Rect(485, 300, 300, 85)),
-        ("8 x 8", "HARD", 240, 8, pygame.Rect(115, 410, 300, 85)),
-        ("10 x 10", "EXPERT", 360, 10, pygame.Rect(485, 410, 300, 85))
+        ("4 x 4", "EASY", 90, 4,
+         pygame.Rect(115, 300, 300, 85)),
+
+        ("6 x 6", "MEDIUM", 150, 6,
+         pygame.Rect(485, 300, 300, 85)),
+
+        ("8 x 8", "HARD", 240, 8,
+         pygame.Rect(115, 410, 300, 85)),
+
+        ("10 x 10", "EXPERT", 360, 10,
+         pygame.Rect(485, 410, 300, 85))
     ]
 
-    leaderboard_button = pygame.Rect(235, 550, 200, 65)
-    exit_button = pygame.Rect(465, 550, 200, 65)
+    leaderboard_button = pygame.Rect(
+        235, 550, 200, 65
+    )
+
+    exit_button = pygame.Rect(
+        465, 550, 200, 65
+    )
 
     while True:
 
@@ -327,7 +508,9 @@ def main_menu():
             180
         )
 
-        draw_panel(pygame.Rect(75, 245, 750, 290))
+        draw_panel(
+            pygame.Rect(75, 245, 750, 290)
+        )
 
         for label, difficulty, seconds, size, rect in buttons:
 
@@ -376,19 +559,24 @@ def main_menu():
                 return "exit"
 
             if event.type == pygame.KEYDOWN:
+
                 if event.key == pygame.K_ESCAPE:
                     return "exit"
 
             if event.type == pygame.MOUSEBUTTONDOWN:
 
                 for label, difficulty, seconds, size, rect in buttons:
+
                     if rect.collidepoint(event.pos):
-                        play_sound(click_sound)
+
+                        play_sound("click")
                         return size
 
                 if leaderboard_button.collidepoint(event.pos):
-                    play_sound(click_sound)
+
+                    play_sound("click")
                     show_leaderboard()
+                    play_music("menu")
 
                 if exit_button.collidepoint(event.pos):
                     return "exit"
@@ -478,7 +666,9 @@ def show_leaderboard():
 
             y += 145
 
-        back_button = pygame.Rect(330, 720, 240, 55)
+        back_button = pygame.Rect(
+            330, 720, 240, 55
+        )
 
         draw_button(
             "BACK TO MENU",
@@ -495,12 +685,15 @@ def show_leaderboard():
                 raise SystemExit
 
             if event.type == pygame.KEYDOWN:
+
                 if event.key == pygame.K_ESCAPE:
                     return
 
             if event.type == pygame.MOUSEBUTTONDOWN:
+
                 if back_button.collidepoint(event.pos):
-                    play_sound(click_sound)
+
+                    play_sound("click")
                     return
 
         clock.tick(30)
@@ -509,6 +702,16 @@ def show_leaderboard():
 # ---------------- GAME ----------------
 
 def start_game(size, player_name):
+
+    # Select music according to difficulty
+    music_names = {
+        4: "easy",
+        6: "medium",
+        8: "hard",
+        10: "expert"
+    }
+
+    play_music(music_names[size])
 
     emojis = [
         "😀", "😎", "🤖", "👻", "🐱",
@@ -559,7 +762,9 @@ def start_game(size, player_name):
         elapsed = int(time.time() - start_time)
         remaining = max(0, time_limit - elapsed)
 
-        draw_panel(pygame.Rect(20, 15, 860, 75))
+        draw_panel(
+            pygame.Rect(20, 15, 860, 75)
+        )
 
         draw_text(
             f"PLAYER: {player_name}",
@@ -644,6 +849,7 @@ def start_game(size, player_name):
             break
 
         if len(opened) == 2:
+
             if time.time() - last_open_time >= 0.8:
                 opened.clear()
 
@@ -656,12 +862,15 @@ def start_game(size, player_name):
             if event.type == pygame.KEYDOWN:
 
                 if event.key == pygame.K_ESCAPE:
+                    stop_music()
                     return "menu"
 
                 if event.key == pygame.K_r:
+                    stop_music()
                     return "restart"
 
                 if event.key == pygame.K_q:
+                    stop_music()
                     return "exit"
 
             if event.type == pygame.MOUSEBUTTONDOWN:
@@ -681,7 +890,7 @@ def start_game(size, player_name):
                     if index not in matched and index not in opened:
 
                         opened.append(index)
-                        play_sound(click_sound)
+                        play_sound("click")
 
                         if len(opened) == 2:
 
@@ -695,7 +904,7 @@ def start_game(size, player_name):
                                 matched.extend(opened)
                                 opened.clear()
 
-                                play_sound(match_sound)
+                                play_sound("match")
 
                             else:
                                 last_open_time = time.time()
@@ -703,6 +912,9 @@ def start_game(size, player_name):
         clock.tick(60)
 
     elapsed = int(time.time() - start_time)
+
+    # Stop stage music and play the result effect
+    stop_music()
 
     if result == "win":
 
@@ -713,10 +925,10 @@ def start_game(size, player_name):
             size
         )
 
-        play_sound(win_sound)
+        play_sound("win")
 
     else:
-        play_sound(lose_sound)
+        play_sound("lose")
 
     return result, elapsed, moves
 
@@ -729,7 +941,9 @@ def result_screen(result, player_name, elapsed, moves):
 
         draw_background()
 
-        draw_panel(pygame.Rect(150, 180, 600, 440))
+        draw_panel(
+            pygame.Rect(150, 180, 600, 440)
+        )
 
         if result == "win":
 
@@ -799,11 +1013,25 @@ def result_screen(result, player_name, elapsed, moves):
                 420
             )
 
-        restart_button = pygame.Rect(180, 550, 220, 55)
-        menu_button = pygame.Rect(500, 550, 220, 55)
+        restart_button = pygame.Rect(
+            180, 550, 220, 55
+        )
 
-        draw_button("PLAY AGAIN", restart_button, GREEN)
-        draw_button("MAIN MENU", menu_button, BLUE)
+        menu_button = pygame.Rect(
+            500, 550, 220, 55
+        )
+
+        draw_button(
+            "PLAY AGAIN",
+            restart_button,
+            GREEN
+        )
+
+        draw_button(
+            "MAIN MENU",
+            menu_button,
+            BLUE
+        )
 
         pygame.display.flip()
 
@@ -814,17 +1042,20 @@ def result_screen(result, player_name, elapsed, moves):
                 raise SystemExit
 
             if event.type == pygame.KEYDOWN:
+
                 if event.key == pygame.K_ESCAPE:
                     return "menu"
 
             if event.type == pygame.MOUSEBUTTONDOWN:
 
                 if restart_button.collidepoint(event.pos):
-                    play_sound(click_sound)
+
+                    play_sound("click")
                     return "restart"
 
                 if menu_button.collidepoint(event.pos):
-                    play_sound(click_sound)
+
+                    play_sound("click")
                     return "menu"
 
         clock.tick(30)
@@ -833,8 +1064,6 @@ def result_screen(result, player_name, elapsed, moves):
 # ---------------- MAIN LOOP ----------------
 
 def main():
-
-    play_music()
 
     while True:
 
@@ -853,7 +1082,10 @@ def main():
 
         while True:
 
-            game_result = start_game(size, player_name)
+            game_result = start_game(
+                size,
+                player_name
+            )
 
             if game_result == "exit":
                 pygame.quit()
@@ -883,4 +1115,5 @@ def main():
     pygame.quit()
 
 
-main()
+if __name__ == "__main__":
+    main()

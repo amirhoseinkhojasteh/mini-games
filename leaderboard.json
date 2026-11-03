@@ -40,5 +40,17 @@
         "time": 39,
         "moves": 18,
         "size": 4
+    },
+    {
+        "name": "ami",
+        "time": 25,
+        "moves": 14,
+        "size": 4
+    },
+    {
+        "name": "elmira",
+        "time": 98,
+        "moves": 46,
+        "size": 6
     }
 ]
