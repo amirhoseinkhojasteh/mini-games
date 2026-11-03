@@ -28,5 +28,17 @@
         "time": 51,
         "moves": 19,
         "size": 4
+    },
+    {
+        "name": "elnaz",
+        "time": 25,
+        "moves": 14,
+        "size": 4
+    },
+    {
+        "name": "a,ir",
+        "time": 39,
+        "moves": 18,
+        "size": 4
     }
 ]

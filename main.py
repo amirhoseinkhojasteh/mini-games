@@ -5,6 +5,7 @@ import os
 import math
 import struct
 import time
+import array
 
 pygame.init()
 
@@ -18,64 +19,181 @@ pygame.display.set_caption("Memory Match")
 
 clock = pygame.time.Clock()
 
-WHITE = (255, 255, 255)
-BLACK = (20, 20, 30)
-GRAY = (80, 80, 100)
-BLUE = (50, 120, 220)
-GREEN = (50, 180, 100)
-RED = (220, 60, 60)
-YELLOW = (240, 190, 50)
-PURPLE = (130, 80, 200)
+# COLORS
+BG = (15, 18, 35)
+PANEL = (27, 32, 57)
+CARD = (42, 49, 79)
+CARD_HOVER = (57, 68, 105)
 
-font = pygame.font.SysFont("segoeuiemoji", 30)
-small_font = pygame.font.SysFont("segoeuiemoji", 20)
-title_font = pygame.font.SysFont("segoeuiemoji", 55)
+WHITE = (245, 247, 255)
+GRAY = (155, 165, 190)
+BLUE = (75, 130, 255)
+GREEN = (65, 205, 145)
+RED = (245, 85, 105)
+YELLOW = (255, 205, 90)
+PURPLE = (155, 105, 255)
+
+font = pygame.font.SysFont("segoeuiemoji", 26)
+small_font = pygame.font.SysFont("segoeuiemoji", 19)
+title_font = pygame.font.SysFont("segoeuiemoji", 58)
+emoji_font = pygame.font.SysFont("segoeuiemoji", 35)
 
 LEADERBOARD_FILE = "leaderboard.json"
 
-# ---------------- DIFFICULTY ----------------
-
 DIFFICULTIES = {
-    4: {"name": "Easy", "time": 90},
-    6: {"name": "Medium", "time": 150},
-    8: {"name": "Hard", "time": 240},
-    10: {"name": "Expert", "time": 360}
+    4: {"name": "EASY", "time": 90, "color": GREEN},
+    6: {"name": "MEDIUM", "time": 150, "color": BLUE},
+    8: {"name": "HARD", "time": 240, "color": YELLOW},
+    10: {"name": "EXPERT", "time": 360, "color": RED}
 }
 
-# ---------------- SOUND ----------------
+# ---------------- SOUND SYSTEM ----------------
 
-try:
-    pygame.mixer.init()
+sound_enabled = False
+music_channel = None
 
-    def create_sound(frequency, duration=0.15):
-        sample_rate = 22050
-        samples = int(sample_rate * duration)
-        buffer = bytearray()
 
-        for i in range(samples):
+def create_sound(frequency, duration=0.15, volume=0.2):
+    sample_rate = 22050
+    samples = int(sample_rate * duration)
+    buffer = bytearray()
+
+    for i in range(samples):
+        fade = min(1, i / 300, (samples - i) / 500)
+
+        value = int(
+            12000
+            * volume
+            * fade
+            * math.sin(2 * math.pi * frequency * i / sample_rate)
+        )
+
+        buffer.extend(struct.pack("<h", value))
+
+    return pygame.mixer.Sound(buffer=bytes(buffer))
+
+
+def create_music():
+    # A small original looping melody, generated without external files.
+    sample_rate = 22050
+    notes = [
+        523, 659, 784, 659,
+        587, 698, 880, 698,
+        523, 659, 784, 1046,
+        880, 784, 659, 587
+    ]
+
+    note_duration = 0.22
+    audio = array.array("h")
+
+    for frequency in notes:
+        count = int(sample_rate * note_duration)
+
+        for i in range(count):
+            fade = min(1, i / 500, (count - i) / 700)
+
             value = int(
-                10000 * math.sin(
+                2500
+                * fade
+                * math.sin(
                     2 * math.pi * frequency * i / sample_rate
                 )
             )
-            buffer.extend(struct.pack("<h", value))
 
-        return pygame.mixer.Sound(buffer=bytes(buffer))
+            audio.append(value)
 
-    click_sound = create_sound(500)
-    match_sound = create_sound(800)
-    win_sound = create_sound(1000, 0.4)
-    lose_sound = create_sound(200, 0.4)
+    return pygame.mixer.Sound(buffer=audio.tobytes())
+
+
+try:
+    pygame.mixer.init(frequency=22050, size=-16, channels=1)
+
+    click_sound = create_sound(500, 0.08)
+    match_sound = create_sound(850, 0.18)
+    win_sound = create_sound(1000, 0.35)
+    lose_sound = create_sound(220, 0.35)
+
+    background_music = create_music()
+    background_music.set_volume(0.12)
 
     sound_enabled = True
 
-except:
+except pygame.error:
     sound_enabled = False
 
 
 def play_sound(sound):
     if sound_enabled:
         sound.play()
+
+
+def play_music():
+    if sound_enabled and not pygame.mixer.get_busy():
+        background_music.play(-1)
+
+
+def stop_music():
+    if sound_enabled:
+        pygame.mixer.stop()
+
+
+# ---------------- DRAWING HELPERS ----------------
+
+def draw_text(text, font_obj, color, x, y, center=True):
+    image = font_obj.render(str(text), True, color)
+
+    if center:
+        rect = image.get_rect(center=(x, y))
+    else:
+        rect = image.get_rect(topleft=(x, y))
+
+    screen.blit(image, rect)
+
+
+def draw_panel(rect, color=PANEL, radius=20):
+    pygame.draw.rect(
+        screen,
+        color,
+        rect,
+        border_radius=radius
+    )
+
+
+def draw_button(text, rect, color=BLUE, hover_color=CARD_HOVER):
+    mouse = pygame.mouse.get_pos()
+    hovered = rect.collidepoint(mouse)
+
+    current_color = hover_color if hovered else color
+
+    pygame.draw.rect(
+        screen,
+        current_color,
+        rect,
+        border_radius=14
+    )
+
+    pygame.draw.rect(
+        screen,
+        (95, 110, 155),
+        rect,
+        1,
+        border_radius=14
+    )
+
+    draw_text(
+        text,
+        small_font,
+        WHITE,
+        rect.centerx,
+        rect.centery
+    )
+
+
+def draw_background():
+    screen.fill(BG)
+
+    pygame.draw.circle(screen, (25, 34, 65), (40, 50), 170)
+    pygame.draw.circle(screen, (30, 25, 65), (850, 740), 200)
 
 
 # ---------------- LEADERBOARD ----------------
@@ -109,57 +227,55 @@ def add_record(name, elapsed, moves, size):
         "size": size
     })
 
-    records.sort(
-        key=lambda record: (record["size"], record["time"], record["moves"])
-    )
-
     save_leaderboard(records)
 
 
-# ---------------- HELPERS ----------------
-
-def draw_text(text, font_obj, color, x, y, center=True):
-    image = font_obj.render(str(text), True, color)
-
-    if center:
-        rect = image.get_rect(center=(x, y))
-    else:
-        rect = image.get_rect(topleft=(x, y))
-
-    screen.blit(image, rect)
-
-
-def draw_button(text, rect, color=BLUE):
-    pygame.draw.rect(screen, color, rect, border_radius=12)
-    pygame.draw.rect(screen, WHITE, rect, 2, border_radius=12)
-
-    draw_text(
-        text,
-        small_font,
-        WHITE,
-        rect.centerx,
-        rect.centery
-    )
-
+# ---------------- PLAYER NAME ----------------
 
 def get_input(prompt):
     name = ""
 
     while True:
-        screen.fill(BLACK)
+        draw_background()
 
-        draw_text(prompt, title_font, WHITE, WIDTH // 2, 250)
-        draw_text(name + "|", font, YELLOW, WIDTH // 2, 370)
-        draw_text("ENTER = Continue | ESC = Back",
-                  small_font, WHITE, WIDTH // 2, 450)
+        draw_panel(pygame.Rect(180, 220, 540, 350))
+
+        draw_text(prompt, title_font, WHITE, WIDTH // 2, 300)
+
+        input_rect = pygame.Rect(270, 370, 360, 65)
+
+        pygame.draw.rect(
+            screen,
+            CARD,
+            input_rect,
+            border_radius=12
+        )
+
+        draw_text(
+            name + "|",
+            font,
+            YELLOW,
+            WIDTH // 2,
+            402
+        )
+
+        draw_text(
+            "ENTER: Continue     ESC: Back",
+            small_font,
+            GRAY,
+            WIDTH // 2,
+            490
+        )
 
         pygame.display.flip()
 
         for event in pygame.event.get():
+
             if event.type == pygame.QUIT:
                 return None
 
             if event.type == pygame.KEYDOWN:
+
                 if event.key == pygame.K_ESCAPE:
                     return ""
 
@@ -180,34 +296,82 @@ def get_input(prompt):
 # ---------------- MAIN MENU ----------------
 
 def main_menu():
+
     buttons = [
-        ("4 x 4  EASY", pygame.Rect(100, 300, 300, 65), 4),
-        ("6 x 6  MEDIUM", pygame.Rect(500, 300, 300, 65), 6),
-        ("8 x 8  HARD", pygame.Rect(100, 400, 300, 65), 8),
-        ("10 x 10  EXPERT", pygame.Rect(500, 400, 300, 65), 10)
+        ("4 x 4", "EASY", 90, 4, pygame.Rect(115, 300, 300, 85)),
+        ("6 x 6", "MEDIUM", 150, 6, pygame.Rect(485, 300, 300, 85)),
+        ("8 x 8", "HARD", 240, 8, pygame.Rect(115, 410, 300, 85)),
+        ("10 x 10", "EXPERT", 360, 10, pygame.Rect(485, 410, 300, 85))
     ]
 
-    leaderboard_button = pygame.Rect(250, 520, 180, 65)
-    exit_button = pygame.Rect(470, 520, 180, 65)
+    leaderboard_button = pygame.Rect(235, 550, 200, 65)
+    exit_button = pygame.Rect(465, 550, 200, 65)
 
     while True:
-        screen.fill(BLACK)
 
-        draw_text("MEMORY MATCH", title_font, YELLOW,
-                  WIDTH // 2, 130)
+        draw_background()
 
-        draw_text("Choose your difficulty",
-                  font, WHITE, WIDTH // 2, 220)
+        draw_text(
+            "MEMORY MATCH",
+            title_font,
+            YELLOW,
+            WIDTH // 2,
+            115
+        )
 
-        for text, rect, size in buttons:
-            draw_button(text, rect)
+        draw_text(
+            "TEST YOUR MEMORY",
+            small_font,
+            GRAY,
+            WIDTH // 2,
+            180
+        )
 
-        draw_button("LEADERBOARD", leaderboard_button, PURPLE)
-        draw_button("EXIT", exit_button, RED)
+        draw_panel(pygame.Rect(75, 245, 750, 290))
+
+        for label, difficulty, seconds, size, rect in buttons:
+
+            color = DIFFICULTIES[size]["color"]
+
+            draw_button(
+                f"{label}   |   {difficulty}",
+                rect,
+                CARD,
+                CARD_HOVER
+            )
+
+            draw_text(
+                f"{seconds} seconds",
+                small_font,
+                color,
+                rect.centerx,
+                rect.centery + 24
+            )
+
+        draw_button(
+            "LEADERBOARD",
+            leaderboard_button,
+            PURPLE
+        )
+
+        draw_button(
+            "EXIT",
+            exit_button,
+            RED
+        )
+
+        draw_text(
+            "Find all matching pairs before time runs out!",
+            small_font,
+            GRAY,
+            WIDTH // 2,
+            690
+        )
 
         pygame.display.flip()
 
         for event in pygame.event.get():
+
             if event.type == pygame.QUIT:
                 return "exit"
 
@@ -216,27 +380,37 @@ def main_menu():
                     return "exit"
 
             if event.type == pygame.MOUSEBUTTONDOWN:
-                for text, rect, size in buttons:
+
+                for label, difficulty, seconds, size, rect in buttons:
                     if rect.collidepoint(event.pos):
+                        play_sound(click_sound)
                         return size
 
                 if leaderboard_button.collidepoint(event.pos):
+                    play_sound(click_sound)
                     show_leaderboard()
 
                 if exit_button.collidepoint(event.pos):
                     return "exit"
 
-        clock.tick(30)
+        clock.tick(60)
 
 
 # ---------------- LEADERBOARD SCREEN ----------------
 
 def show_leaderboard():
-    while True:
-        screen.fill(BLACK)
 
-        draw_text("LEADERBOARD", title_font, YELLOW,
-                  WIDTH // 2, 65)
+    while True:
+
+        draw_background()
+
+        draw_text(
+            "LEADERBOARD",
+            title_font,
+            YELLOW,
+            WIDTH // 2,
+            65
+        )
 
         records = load_leaderboard()
 
@@ -244,16 +418,20 @@ def show_leaderboard():
 
         for size, info in DIFFICULTIES.items():
 
-            draw_text(
-                f"{info['name']}  ({size}x{size})",
-                font,
-                YELLOW,
-                40,
-                y,
-                False
+            draw_panel(
+                pygame.Rect(100, y, 700, 135),
+                PANEL,
+                14
             )
 
-            y += 35
+            draw_text(
+                f"{info['name']}  ({size} x {size})",
+                font,
+                info["color"],
+                125,
+                y + 12,
+                False
+            )
 
             category_records = [
                 record for record in records
@@ -268,55 +446,50 @@ def show_leaderboard():
             )
 
             if not category_records:
+
                 draw_text(
                     "No records yet!",
                     small_font,
                     GRAY,
-                    55,
-                    y,
+                    130,
+                    y + 65,
                     False
                 )
-                y += 30
 
             else:
-                draw_text(
-                    "Rank     Player                 Time       Moves",
-                    small_font,
-                    WHITE,
-                    55,
-                    y,
-                    False
-                )
-                y += 28
 
-                for index, record in enumerate(category_records[:3]):
+                for index, record in enumerate(category_records[:2]):
 
                     line = (
-                        f"{index + 1}.          "
-                        f"{record.get('name', 'Unknown')[:16]:16} "
-                        f"{record.get('time', 0)}s          "
-                        f"{record.get('moves', 0)}"
+                        f"{index + 1}.  "
+                        f"{record.get('name', 'Unknown')[:18]}    "
+                        f"{record.get('time', 0)}s    "
+                        f"{record.get('moves', 0)} moves"
                     )
 
                     draw_text(
                         line,
                         small_font,
                         GREEN if index == 0 else WHITE,
-                        55,
-                        y,
+                        130,
+                        y + 58 + index * 30,
                         False
                     )
 
-                    y += 27
+            y += 145
 
-            y += 12
+        back_button = pygame.Rect(330, 720, 240, 55)
 
-        back_button = pygame.Rect(330, 730, 240, 55)
-        draw_button("BACK", back_button, RED)
+        draw_button(
+            "BACK TO MENU",
+            back_button,
+            BLUE
+        )
 
         pygame.display.flip()
 
         for event in pygame.event.get():
+
             if event.type == pygame.QUIT:
                 pygame.quit()
                 raise SystemExit
@@ -327,6 +500,7 @@ def show_leaderboard():
 
             if event.type == pygame.MOUSEBUTTONDOWN:
                 if back_button.collidepoint(event.pos):
+                    play_sound(click_sound)
                     return
 
         clock.tick(30)
@@ -380,34 +554,36 @@ def start_game(size, player_name):
 
     while True:
 
-        screen.fill(BLACK)
+        draw_background()
 
         elapsed = int(time.time() - start_time)
         remaining = max(0, time_limit - elapsed)
 
+        draw_panel(pygame.Rect(20, 15, 860, 75))
+
         draw_text(
-            f"Player: {player_name}",
+            f"PLAYER: {player_name}",
             small_font,
             WHITE,
-            20,
-            25,
+            40,
+            40,
             False
         )
 
         draw_text(
-            f"Time: {remaining}s",
+            f"TIME: {remaining}s",
             font,
             YELLOW if remaining > 10 else RED,
             WIDTH // 2,
-            45
+            52
         )
 
         draw_text(
-            f"Moves: {moves}",
+            f"MOVES: {moves}",
             small_font,
             WHITE,
             WIDTH - 150,
-            25,
+            40,
             False
         )
 
@@ -428,10 +604,12 @@ def start_game(size, player_name):
 
             if index in matched:
                 color = GREEN
+
             elif index in opened:
                 color = BLUE
+
             else:
-                color = GRAY
+                color = CARD
 
             pygame.draw.rect(
                 screen,
@@ -440,24 +618,16 @@ def start_game(size, player_name):
                 border_radius=8
             )
 
-            pygame.draw.rect(
-                screen,
-                WHITE,
-                rect,
-                2,
-                border_radius=8
-            )
-
             if index in matched or index in opened:
 
-                emoji_font = pygame.font.SysFont(
+                current_emoji_font = pygame.font.SysFont(
                     "segoeuiemoji",
                     max(12, min(45, card_size // 2))
                 )
 
                 draw_text(
                     card,
-                    emoji_font,
+                    current_emoji_font,
                     WHITE,
                     rect.centerx,
                     rect.centery
@@ -465,19 +635,13 @@ def start_game(size, player_name):
 
         pygame.display.flip()
 
-        # WIN CHECK
-
         if len(matched) == len(cards):
             result = "win"
             break
 
-        # TIME CHECK
-
         if remaining <= 0:
             result = "lose"
             break
-
-        # HIDE WRONG CARDS
 
         if len(opened) == 2:
             if time.time() - last_open_time >= 0.8:
@@ -538,11 +702,9 @@ def start_game(size, player_name):
 
         clock.tick(60)
 
-    # ---------------- SAVE RESULT ----------------
+    elapsed = int(time.time() - start_time)
 
     if result == "win":
-
-        elapsed = int(time.time() - start_time)
 
         add_record(
             player_name,
@@ -556,16 +718,18 @@ def start_game(size, player_name):
     else:
         play_sound(lose_sound)
 
-    return result
+    return result, elapsed, moves
 
 
 # ---------------- RESULT SCREEN ----------------
 
-def result_screen(result, player_name, size, moves, elapsed):
+def result_screen(result, player_name, elapsed, moves):
 
     while True:
 
-        screen.fill(BLACK)
+        draw_background()
+
+        draw_panel(pygame.Rect(150, 180, 600, 440))
 
         if result == "win":
 
@@ -574,7 +738,7 @@ def result_screen(result, player_name, size, moves, elapsed):
                 title_font,
                 GREEN,
                 WIDTH // 2,
-                180
+                250
             )
 
             draw_text(
@@ -582,7 +746,7 @@ def result_screen(result, player_name, size, moves, elapsed):
                 font,
                 YELLOW,
                 WIDTH // 2,
-                270
+                340
             )
 
             draw_text(
@@ -590,7 +754,7 @@ def result_screen(result, player_name, size, moves, elapsed):
                 small_font,
                 WHITE,
                 WIDTH // 2,
-                340
+                410
             )
 
             draw_text(
@@ -598,7 +762,7 @@ def result_screen(result, player_name, size, moves, elapsed):
                 small_font,
                 WHITE,
                 WIDTH // 2,
-                380
+                450
             )
 
             draw_text(
@@ -606,7 +770,7 @@ def result_screen(result, player_name, size, moves, elapsed):
                 small_font,
                 GREEN,
                 WIDTH // 2,
-                430
+                500
             )
 
         else:
@@ -616,7 +780,7 @@ def result_screen(result, player_name, size, moves, elapsed):
                 title_font,
                 RED,
                 WIDTH // 2,
-                200
+                260
             )
 
             draw_text(
@@ -624,7 +788,7 @@ def result_screen(result, player_name, size, moves, elapsed):
                 font,
                 WHITE,
                 WIDTH // 2,
-                300
+                350
             )
 
             draw_text(
@@ -632,11 +796,11 @@ def result_screen(result, player_name, size, moves, elapsed):
                 small_font,
                 GRAY,
                 WIDTH // 2,
-                370
+                420
             )
 
-        restart_button = pygame.Rect(180, 540, 220, 65)
-        menu_button = pygame.Rect(500, 540, 220, 65)
+        restart_button = pygame.Rect(180, 550, 220, 55)
+        menu_button = pygame.Rect(500, 550, 220, 55)
 
         draw_button("PLAY AGAIN", restart_button, GREEN)
         draw_button("MAIN MENU", menu_button, BLUE)
@@ -656,9 +820,11 @@ def result_screen(result, player_name, size, moves, elapsed):
             if event.type == pygame.MOUSEBUTTONDOWN:
 
                 if restart_button.collidepoint(event.pos):
+                    play_sound(click_sound)
                     return "restart"
 
                 if menu_button.collidepoint(event.pos):
+                    play_sound(click_sound)
                     return "menu"
 
         clock.tick(30)
@@ -668,6 +834,8 @@ def result_screen(result, player_name, size, moves, elapsed):
 
 def main():
 
+    play_music()
+
     while True:
 
         size = main_menu()
@@ -675,7 +843,7 @@ def main():
         if size == "exit":
             break
 
-        player_name = get_input("Enter your name")
+        player_name = get_input("ENTER YOUR NAME")
 
         if player_name is None:
             break
@@ -685,42 +853,25 @@ def main():
 
         while True:
 
-            result = start_game(size, player_name)
+            game_result = start_game(size, player_name)
 
-            if result == "exit":
+            if game_result == "exit":
                 pygame.quit()
                 return
 
-            if result == "menu":
+            if game_result == "menu":
                 break
 
-            if result == "restart":
+            if game_result == "restart":
                 continue
 
-            # Read final game statistics from the saved record
-            records = load_leaderboard()
-            latest = next(
-                (
-                    record for record in reversed(records)
-                    if record.get("name") == player_name
-                    and record.get("size") == size
-                ),
-                None
-            )
-
-            if result == "win" and latest:
-                elapsed = latest["time"]
-                moves = latest["moves"]
-            else:
-                elapsed = DIFFICULTIES[size]["time"]
-                moves = 0
+            result, elapsed, moves = game_result
 
             next_action = result_screen(
                 result,
                 player_name,
-                size,
-                moves,
-                elapsed
+                elapsed,
+                moves
             )
 
             if next_action == "restart":
@@ -728,6 +879,7 @@ def main():
 
             break
 
+    stop_music()
     pygame.quit()
 
 
