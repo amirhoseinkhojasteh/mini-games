@@ -52,5 +52,11 @@
         "time": 98,
         "moves": 46,
         "size": 6
+    },
+    {
+        "name": "j",
+        "time": 24,
+        "moves": 14,
+        "size": 4
     }
 ]
