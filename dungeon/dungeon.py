@@ -36,7 +36,6 @@ BIG = pygame.font.SysFont("segoeui", 44, bold=True)
 
 WHITE = (240, 245, 255)
 BLACK = (10, 10, 15)
-
 GOLD = (255, 204, 55)
 GREEN = (70, 225, 145)
 RED = (240, 70, 100)
@@ -45,7 +44,7 @@ CYAN = (130, 220, 255)
 ORANGE = (255, 120, 30)
 
 # ==================================================
-# MAP THEMES
+# THEMES
 # ==================================================
 
 THEMES = {
@@ -56,7 +55,6 @@ THEMES = {
         "edge": (160, 110, 60),
         "obstacles": ["C", "R", "R", "B"]
     },
-
     "FOREST": {
         "floor1": (35, 85, 48),
         "floor2": (45, 105, 58),
@@ -64,7 +62,6 @@ THEMES = {
         "edge": (100, 75, 45),
         "obstacles": ["T", "T", "B", "R"]
     },
-
     "CAVE": {
         "floor1": (45, 48, 62),
         "floor2": (55, 58, 75),
@@ -72,7 +69,6 @@ THEMES = {
         "edge": (95, 100, 125),
         "obstacles": ["R", "R", "W"]
     },
-
     "ICE": {
         "floor1": (115, 170, 205),
         "floor2": (140, 195, 225),
@@ -80,7 +76,6 @@ THEMES = {
         "edge": (180, 225, 255),
         "obstacles": ["I", "I", "R", "W"]
     },
-
     "RUINS": {
         "floor1": (90, 85, 70),
         "floor2": (110, 105, 85),
@@ -124,7 +119,6 @@ def save_game():
     try:
         with open(SAVE_FILE, "w", encoding="utf-8") as file:
             json.dump(data, file, indent=4)
-
     except OSError:
         pass
 
@@ -132,7 +126,7 @@ def save_game():
 saved_checkpoint, best_level, best_score = load_save()
 
 # ==================================================
-# GLOBAL GAME VARIABLES
+# GLOBAL VARIABLES
 # ==================================================
 
 world = []
@@ -145,7 +139,8 @@ player = pygame.Rect(
     30
 )
 
-facing = 1
+# 0 = Right, 1 = Left, 2 = Up, 3 = Down
+facing = 0
 
 level = saved_checkpoint
 checkpoint = saved_checkpoint
@@ -168,6 +163,209 @@ warning_zones = []
 
 key_rect = pygame.Rect(0, 0, 20, 20)
 exit_rect = pygame.Rect(0, 0, TILE, TILE)
+
+# ==================================================
+# ABILITIES
+# ==================================================
+
+abilities = {
+    "damage": 1,
+    "speed": 235,
+    "fire_rate": 0.20,
+    "multishot": 1,
+    "max_lives": 3
+}
+
+ability_options = []
+ability_prices = []
+
+ABILITY_POOL = [
+    {
+        "name": "POWER SHOT",
+        "description": "Increase bullet damage",
+        "price": 150,
+        "type": "damage"
+    },
+    {
+        "name": "FAST RUNNER",
+        "description": "Increase movement speed",
+        "price": 120,
+        "type": "speed"
+    },
+    {
+        "name": "RAPID FIRE",
+        "description": "Shoot faster",
+        "price": 180,
+        "type": "fire_rate"
+    },
+    {
+        "name": "DOUBLE SHOT",
+        "description": "Shoot more bullets",
+        "price": 250,
+        "type": "multishot"
+    },
+    {
+        "name": "EXTRA LIFE",
+        "description": "Increase maximum lives",
+        "price": 300,
+        "type": "max_lives"
+    }
+]
+
+
+def prepare_ability_selection():
+    global ability_options, ability_prices, game_state
+
+    ability_options = random.sample(ABILITY_POOL, 3)
+
+    ability_prices = [
+        ability["price"] + (level - 1) * 20
+        for ability in ability_options
+    ]
+
+    game_state = "choosing"
+
+
+def choose_ability(index):
+    global score, game_state, lives
+
+    if not 0 <= index < len(ability_options):
+        return
+
+    ability = ability_options[index]
+    price = ability_prices[index]
+
+    if score < price:
+        return
+
+    score -= price
+
+    kind = ability["type"]
+
+    if kind == "damage":
+        abilities["damage"] += 1
+
+    elif kind == "speed":
+        abilities["speed"] += 35
+
+    elif kind == "fire_rate":
+        abilities["fire_rate"] = max(
+            0.06,
+            abilities["fire_rate"] - 0.04
+        )
+
+    elif kind == "multishot":
+        abilities["multishot"] += 1
+
+    elif kind == "max_lives":
+        abilities["max_lives"] += 1
+        lives += 1
+
+    game_state = "playing"
+
+
+def draw_ability_menu():
+    overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+    overlay.fill((5, 7, 15, 235))
+    screen.blit(overlay, (0, 0))
+
+    draw_text(
+        "CHOOSE YOUR ABILITY",
+        BIG,
+        GOLD,
+        WIDTH // 2,
+        170,
+        center=True
+    )
+
+    draw_text(
+        f"YOUR SCORE: {score}",
+        FONT,
+        CYAN,
+        WIDTH // 2,
+        225,
+        center=True
+    )
+
+    for i, ability in enumerate(ability_options):
+        box = pygame.Rect(
+            35 + i * 275,
+            300,
+            250,
+            230
+        )
+
+        pygame.draw.rect(
+            screen,
+            (25, 32, 55),
+            box,
+            border_radius=12
+        )
+
+        pygame.draw.rect(
+            screen,
+            BLUE,
+            box,
+            3,
+            border_radius=12
+        )
+
+        draw_text(
+            f"[{i + 1}]",
+            BIG,
+            GOLD,
+            box.centerx,
+            box.y + 35,
+            center=True
+        )
+
+        draw_text(
+            ability["name"],
+            FONT,
+            CYAN,
+            box.centerx,
+            box.y + 90,
+            center=True
+        )
+
+        draw_text(
+            ability["description"],
+            SMALL,
+            WHITE,
+            box.centerx,
+            box.y + 130,
+            center=True
+        )
+
+        price = ability_prices[i]
+
+        draw_text(
+            f"PRICE: {price}",
+            FONT,
+            GREEN if score >= price else RED,
+            box.centerx,
+            box.y + 175,
+            center=True
+        )
+
+    draw_text(
+        "PRESS 1, 2 OR 3 TO BUY",
+        SMALL,
+        WHITE,
+        WIDTH // 2,
+        590,
+        center=True
+    )
+
+    draw_text(
+        "You can skip with ENTER",
+        SMALL,
+        CYAN,
+        WIDTH // 2,
+        620,
+        center=True
+    )
+
 
 # ==================================================
 # TEXT
@@ -233,12 +431,7 @@ def get_reachable_tiles(start):
     queue = deque([start])
     visited = {start}
 
-    directions = [
-        (1, 0),
-        (-1, 0),
-        (0, 1),
-        (0, -1)
-    ]
+    directions = [(1, 0), (-1, 0), (0, 1), (0, -1)]
 
     while queue:
         x, y = queue.popleft()
@@ -267,12 +460,7 @@ def find_path(start, goal):
     queue = deque([start])
     came_from = {start: None}
 
-    directions = [
-        (1, 0),
-        (-1, 0),
-        (0, 1),
-        (0, -1)
-    ]
+    directions = [(1, 0), (-1, 0), (0, 1), (0, -1)]
 
     while queue:
         current = queue.popleft()
@@ -281,10 +469,7 @@ def find_path(start, goal):
             break
 
         for dx, dy in directions:
-            nxt = (
-                current[0] + dx,
-                current[1] + dy
-            )
+            nxt = (current[0] + dx, current[1] + dy)
 
             if not (
                 0 <= nxt[0] < COLS
@@ -331,12 +516,10 @@ def make_map(stage):
         for _ in range(ROWS)
     ]
 
-    # Border
     for y in range(ROWS):
         for x in range(COLS):
             if (
-                x == 0
-                or y == 0
+                x == 0 or y == 0
                 or x == COLS - 1
                 or y == ROWS - 1
             ):
@@ -345,7 +528,6 @@ def make_map(stage):
     spawn = (2, 2)
     exit_tile = (COLS - 3, ROWS - 3)
 
-    # Random obstacles
     obstacle_count = min(15 + stage * 2, 60)
 
     for _ in range(obstacle_count):
@@ -360,17 +542,14 @@ def make_map(stage):
 
         world[y][x] = random.choice(theme["obstacles"])
 
-    # Clear spawn area
     for y in range(1, 5):
         for x in range(1, 5):
             world[y][x] = "."
 
-    # Clear exit area
     for y in range(ROWS - 5, ROWS - 1):
         for x in range(COLS - 5, COLS - 1):
             world[y][x] = "."
 
-    # Create a guaranteed path
     x, y = spawn
 
     while x != exit_tile[0]:
@@ -390,7 +569,6 @@ def make_map(stage):
 
 def draw_map():
     theme = THEMES[current_theme]
-
     screen.fill((12, 14, 25))
 
     for y in range(ROWS):
@@ -413,59 +591,15 @@ def draw_map():
 
                 pygame.draw.rect(screen, color, tile)
 
-                if current_theme == "DESERT":
-                    if (x * 3 + y) % 7 == 0:
-                        pygame.draw.circle(
-                            screen,
-                            (225, 185, 115),
-                            tile.center,
-                            2
-                        )
-
-                elif current_theme == "FOREST":
-                    if (x + y * 2) % 8 == 0:
-                        pygame.draw.circle(
-                            screen,
-                            (65, 130, 70),
-                            tile.center,
-                            3
-                        )
-
-                elif current_theme == "ICE":
-                    if (x + y) % 6 == 0:
-                        pygame.draw.line(
-                            screen,
-                            (190, 230, 255),
-                            tile.topleft,
-                            tile.bottomright,
-                            2
-                        )
-
             else:
-                pygame.draw.rect(
-                    screen,
-                    theme["wall"],
-                    tile
-                )
+                pygame.draw.rect(screen, theme["wall"], tile)
+                pygame.draw.rect(screen, theme["edge"], tile, 2)
 
-                pygame.draw.rect(
-                    screen,
-                    theme["edge"],
-                    tile,
-                    2
-                )
-
-                # Trees
                 if kind == "T":
                     pygame.draw.rect(
                         screen,
                         (75, 45, 25),
-                        (
-                            tile.centerx - 5,
-                            tile.y + 20,
-                            10,
-                            18
-                        )
+                        (tile.centerx - 5, tile.y + 20, 10, 18)
                     )
 
                     pygame.draw.circle(
@@ -475,64 +609,21 @@ def draw_map():
                         17
                     )
 
-                    pygame.draw.circle(
-                        screen,
-                        (40, 135, 55),
-                        (tile.centerx - 5, tile.y + 10),
-                        11
-                    )
-
-                # Cactus
                 elif kind == "C":
                     pygame.draw.rect(
                         screen,
                         (35, 125, 65),
-                        (
-                            tile.centerx - 5,
-                            tile.y + 8,
-                            10,
-                            28
-                        ),
+                        (tile.centerx - 5, tile.y + 8, 10, 28),
                         border_radius=4
                     )
 
-                    pygame.draw.rect(
-                        screen,
-                        (35, 125, 65),
-                        (
-                            tile.centerx - 15,
-                            tile.y + 15,
-                            10,
-                            5
-                        ),
-                        border_radius=3
-                    )
-
-                # Rock
                 elif kind == "R":
                     pygame.draw.ellipse(
                         screen,
                         (100, 105, 115),
-                        (
-                            tile.x + 5,
-                            tile.y + 7,
-                            30,
-                            28
-                        )
+                        (tile.x + 5, tile.y + 7, 30, 28)
                     )
 
-                    pygame.draw.ellipse(
-                        screen,
-                        (140, 145, 155),
-                        (
-                            tile.x + 9,
-                            tile.y + 9,
-                            16,
-                            9
-                        )
-                    )
-
-                # Bush
                 elif kind == "B":
                     pygame.draw.circle(
                         screen,
@@ -541,45 +632,14 @@ def draw_map():
                         14
                     )
 
-                    pygame.draw.circle(
-                        screen,
-                        (55, 145, 65),
-                        (
-                            tile.centerx - 7,
-                            tile.centery - 5
-                        ),
-                        8
-                    )
-
-                # Water
                 elif kind == "W":
                     pygame.draw.rect(
                         screen,
                         (35, 115, 190),
-                        (
-                            tile.x + 3,
-                            tile.y + 5,
-                            34,
-                            30
-                        ),
+                        (tile.x + 3, tile.y + 5, 34, 30),
                         border_radius=8
                     )
 
-                    pygame.draw.line(
-                        screen,
-                        (125, 210, 255),
-                        (
-                            tile.x + 8,
-                            tile.y + 14
-                        ),
-                        (
-                            tile.x + 28,
-                            tile.y + 14
-                        ),
-                        2
-                    )
-
-                # Ice
                 elif kind == "I":
                     pygame.draw.polygon(
                         screen,
@@ -592,28 +652,11 @@ def draw_map():
                         ]
                     )
 
-                # Pillar
                 elif kind == "P":
                     pygame.draw.rect(
                         screen,
                         (155, 145, 120),
-                        (
-                            tile.x + 8,
-                            tile.y + 5,
-                            24,
-                            30
-                        )
-                    )
-
-                    pygame.draw.rect(
-                        screen,
-                        (190, 180, 150),
-                        (
-                            tile.x + 5,
-                            tile.y + 5,
-                            30,
-                            6
-                        )
+                        (tile.x + 8, tile.y + 5, 24, 30)
                     )
 
 
@@ -625,36 +668,21 @@ def draw_player(rect, direction):
     pygame.draw.ellipse(
         screen,
         (8, 10, 18),
-        (
-            rect.x - 3,
-            rect.bottom - 4,
-            rect.w + 6,
-            9
-        )
+        (rect.x - 3, rect.bottom - 4, rect.w + 6, 9)
     )
 
     # Legs
     pygame.draw.rect(
         screen,
         (29, 38, 64),
-        (
-            rect.x + 5,
-            rect.bottom - 9,
-            8,
-            10
-        ),
+        (rect.x + 5, rect.bottom - 9, 8, 10),
         border_radius=3
     )
 
     pygame.draw.rect(
         screen,
         (29, 38, 64),
-        (
-            rect.right - 13,
-            rect.bottom - 9,
-            8,
-            10
-        ),
+        (rect.right - 13, rect.bottom - 9, 8, 10),
         border_radius=3
     )
 
@@ -662,24 +690,14 @@ def draw_player(rect, direction):
     pygame.draw.rect(
         screen,
         BLUE,
-        (
-            rect.x + 3,
-            rect.y + 11,
-            rect.w - 6,
-            rect.h - 12
-        ),
+        (rect.x + 3, rect.y + 11, rect.w - 6, rect.h - 12),
         border_radius=6
     )
 
     pygame.draw.rect(
         screen,
         (145, 210, 255),
-        (
-            rect.x + 6,
-            rect.y + 14,
-            rect.w - 12,
-            6
-        ),
+        (rect.x + 6, rect.y + 14, rect.w - 12, 6),
         border_radius=2
     )
 
@@ -687,83 +705,87 @@ def draw_player(rect, direction):
     pygame.draw.rect(
         screen,
         (194, 207, 230),
-        (
-            rect.x + 5,
-            rect.y + 1,
-            rect.w - 10,
-            15
-        ),
+        (rect.x + 5, rect.y + 1, rect.w - 10, 15),
         border_radius=5
     )
 
     pygame.draw.rect(
         screen,
         (76, 94, 134),
-        (
-            rect.x + 4,
-            rect.y + 8,
-            rect.w - 8,
-            5
-        )
+        (rect.x + 4, rect.y + 8, rect.w - 8, 5)
     )
 
-    eye_x = rect.centerx + (
-        5 if direction > 0 else -7
-    )
+    # Eyes
+    if direction == 0:
+        eye_x = rect.centerx + 5
+        eye_y = rect.y + 7
+    elif direction == 1:
+        eye_x = rect.centerx - 7
+        eye_y = rect.y + 7
+    elif direction == 2:
+        eye_x = rect.centerx - 2
+        eye_y = rect.y + 3
+    else:
+        eye_x = rect.centerx - 2
+        eye_y = rect.y + 10
 
     pygame.draw.rect(
         screen,
         (20, 28, 45),
-        (eye_x, rect.y + 7, 4, 3)
+        (eye_x, eye_y, 4, 3)
     )
 
     # Sword
-    if direction > 0:
+    if direction == 0:
         pygame.draw.rect(
             screen,
             CYAN,
-            (
-                rect.right - 1,
-                rect.y + 17,
-                14,
-                4
-            ),
+            (rect.right - 1, rect.y + 17, 14, 4),
             border_radius=2
         )
-
         pygame.draw.rect(
             screen,
             GOLD,
-            (
-                rect.right - 3,
-                rect.y + 14,
-                4,
-                10
-            )
+            (rect.right - 3, rect.y + 14, 4, 10)
         )
 
-    else:
+    elif direction == 1:
         pygame.draw.rect(
             screen,
             CYAN,
-            (
-                rect.left - 13,
-                rect.y + 17,
-                14,
-                4
-            ),
+            (rect.left - 13, rect.y + 17, 14, 4),
             border_radius=2
         )
-
         pygame.draw.rect(
             screen,
             GOLD,
-            (
-                rect.left - 1,
-                rect.y + 14,
-                4,
-                10
-            )
+            (rect.left - 1, rect.y + 14, 4, 10)
+        )
+
+    elif direction == 2:
+        pygame.draw.rect(
+            screen,
+            CYAN,
+            (rect.centerx - 2, rect.top - 15, 4, 17),
+            border_radius=2
+        )
+        pygame.draw.rect(
+            screen,
+            GOLD,
+            (rect.centerx - 5, rect.top - 2, 10, 4)
+        )
+
+    elif direction == 3:
+        pygame.draw.rect(
+            screen,
+            CYAN,
+            (rect.centerx - 2, rect.bottom - 2, 4, 17),
+            border_radius=2
+        )
+        pygame.draw.rect(
+            screen,
+            GOLD,
+            (rect.centerx - 5, rect.bottom - 3, 10, 4)
         )
 
 
@@ -775,288 +797,55 @@ def draw_monster(enemy):
     rect = enemy["rect"]
     kind = enemy["kind"]
 
+    colors = {
+        "slime": (45, 190, 100),
+        "skeleton": (210, 210, 220),
+        "demon": (130, 30, 55),
+        "ghost": (175, 210, 255),
+        "orc": (90, 130, 45),
+        "archer": (70, 100, 160),
+        "fire_mage": (110, 35, 150),
+        "jumper": (190, 90, 35),
+        "brute": (80, 80, 90)
+    }
+
     pygame.draw.ellipse(
         screen,
         (8, 10, 18),
-        (
-            rect.x - 3,
-            rect.bottom - 4,
-            rect.w + 6,
-            9
-        )
+        (rect.x - 3, rect.bottom - 4, rect.w + 6, 9)
     )
-
-    # Slime
-    if kind == "slime":
-        pygame.draw.ellipse(
-            screen,
-            (45, 190, 100),
-            rect
-        )
-
-        pygame.draw.circle(
-            screen,
-            (180, 255, 210),
-            (rect.x + 9, rect.y + 12),
-            4
-        )
-
-        pygame.draw.circle(
-            screen,
-            (180, 255, 210),
-            (rect.right - 9, rect.y + 12),
-            4
-        )
-
-    # Skeleton
-    elif kind == "skeleton":
-        pygame.draw.rect(
-            screen,
-            (210, 210, 220),
-            (
-                rect.x + 4,
-                rect.y + 8,
-                rect.w - 8,
-                rect.h - 8
-            ),
-            border_radius=5
-        )
-
-        pygame.draw.rect(
-            screen,
-            (45, 45, 60),
-            (
-                rect.x + 5,
-                rect.y + 8,
-                rect.w - 10,
-                12
-            )
-        )
-
-        pygame.draw.rect(
-            screen,
-            RED,
-            (rect.x + 7, rect.y + 11, 5, 4)
-        )
-
-        pygame.draw.rect(
-            screen,
-            RED,
-            (rect.right - 12, rect.y + 11, 5, 4)
-        )
-
-    # Demon
-    elif kind == "demon":
-        pygame.draw.rect(
-            screen,
-            (130, 30, 55),
-            (
-                rect.x + 2,
-                rect.y + 8,
-                rect.w - 4,
-                rect.h - 8
-            ),
-            border_radius=8
-        )
-
-        pygame.draw.polygon(
-            screen,
-            (220, 50, 65),
-            [
-                (rect.x + 5, rect.y + 10),
-                (rect.x + 1, rect.y - 3),
-                (rect.x + 15, rect.y + 8)
-            ]
-        )
-
-        pygame.draw.polygon(
-            screen,
-            (220, 50, 65),
-            [
-                (rect.right - 5, rect.y + 10),
-                (rect.right - 1, rect.y - 3),
-                (rect.right - 15, rect.y + 8)
-            ]
-        )
-
-        pygame.draw.circle(
-            screen,
-            GOLD,
-            (rect.x + 9, rect.y + 14),
-            3
-        )
-
-        pygame.draw.circle(
-            screen,
-            GOLD,
-            (rect.right - 9, rect.y + 14),
-            3
-        )
-
-    # Ghost
-    elif kind == "ghost":
-        pygame.draw.ellipse(
-            screen,
-            (175, 210, 255),
-            rect
-        )
-
-        pygame.draw.circle(
-            screen,
-            (30, 45, 90),
-            (rect.x + 9, rect.y + 13),
-            4
-        )
-
-        pygame.draw.circle(
-            screen,
-            (30, 45, 90),
-            (rect.right - 9, rect.y + 13),
-            4
-        )
-
-    # Orc
-    elif kind == "orc":
-        pygame.draw.rect(
-            screen,
-            (90, 130, 45),
-            (
-                rect.x + 2,
-                rect.y + 7,
-                rect.w - 4,
-                rect.h - 7
-            ),
-            border_radius=7
-        )
-
-        pygame.draw.circle(
-            screen,
-            RED,
-            (rect.x + 9, rect.y + 12),
-            3
-        )
-
-        pygame.draw.circle(
-            screen,
-            RED,
-            (rect.right - 9, rect.y + 12),
-            3
-        )
-
-    # Archer
-    elif kind == "archer":
-        pygame.draw.rect(
-            screen,
-            (70, 100, 160),
-            (
-                rect.x + 2,
-                rect.y + 8,
-                rect.w - 4,
-                rect.h - 8
-            ),
-            border_radius=6
-        )
-
-        pygame.draw.circle(
-            screen,
-            (230, 230, 245),
-            (rect.centerx, rect.y + 8),
-            10
-        )
-
-        pygame.draw.line(
-            screen,
-            (210, 180, 120),
-            (rect.right, rect.centery),
-            (rect.right + 12, rect.centery),
-            3
-        )
-
-    # Fire Mage
-    elif kind == "fire_mage":
-        pygame.draw.rect(
-            screen,
-            (110, 35, 150),
-            (
-                rect.x + 2,
-                rect.y + 8,
-                rect.w - 4,
-                rect.h - 8
-            ),
-            border_radius=8
-        )
-
-        pygame.draw.circle(
-            screen,
-            ORANGE,
-            rect.center,
-            8
-        )
-
-    # Jumper
-    elif kind == "jumper":
-        pygame.draw.rect(
-            screen,
-            (190, 90, 35),
-            (
-                rect.x + 2,
-                rect.y + 8,
-                rect.w - 4,
-                rect.h - 8
-            ),
-            border_radius=8
-        )
-
-        pygame.draw.polygon(
-            screen,
-            (255, 170, 60),
-            [
-                (rect.x + 5, rect.y + 8),
-                (rect.centerx, rect.y - 8),
-                (rect.right - 5, rect.y + 8)
-            ]
-        )
-
-    # Brute
-    elif kind == "brute":
-        pygame.draw.rect(
-            screen,
-            (80, 80, 90),
-            (
-                rect.x - 4,
-                rect.y + 5,
-                rect.w + 8,
-                rect.h - 5
-            ),
-            border_radius=6
-        )
-
-        pygame.draw.circle(
-            screen,
-            RED,
-            (rect.x + 9, rect.y + 12),
-            4
-        )
-
-        pygame.draw.circle(
-            screen,
-            RED,
-            (rect.right - 9, rect.y + 12),
-            4
-        )
-
-    # Health bar
-    bar_w = rect.w
 
     pygame.draw.rect(
         screen,
-        (50, 20, 30),
-        (rect.x, rect.y - 7, bar_w, 4)
+        colors.get(kind, RED),
+        rect,
+        border_radius=8
     )
 
-    current_w = int(
-        bar_w * enemy["hp"] / enemy["max_hp"]
+    eye_color = GOLD if kind == "demon" else RED
+
+    pygame.draw.circle(
+        screen,
+        eye_color,
+        (rect.x + 9, rect.y + 12),
+        3
     )
+
+    pygame.draw.circle(
+        screen,
+        eye_color,
+        (rect.right - 9, rect.y + 12),
+        3
+    )
+
+    # Health bar
+    pygame.draw.rect(
+        screen,
+        (50, 20, 30),
+        (rect.x, rect.y - 7, rect.w, 4)
+    )
+
+    current_w = int(rect.w * enemy["hp"] / enemy["max_hp"])
 
     pygame.draw.rect(
         screen,
@@ -1086,12 +875,7 @@ def random_open_tile(occupied, reachable):
 
         return rect
 
-    return pygame.Rect(
-        12 * TILE,
-        7 * TILE,
-        26,
-        28
-    )
+    return pygame.Rect(12 * TILE, 7 * TILE, 26, 28)
 
 
 def create_level(stage):
@@ -1132,44 +916,22 @@ def create_level(stage):
     )
 
     occupied = [
-        pygame.Rect(
-            2 * TILE,
-            2 * TILE,
-            55,
-            60
-        ),
+        pygame.Rect(2 * TILE, 2 * TILE, 55, 60),
         exit_rect,
         key_rect
     ]
 
-    # Enemy types unlock gradually
     if stage <= 3:
-        available = [
-            "slime",
-            "skeleton"
-        ]
+        available = ["slime", "skeleton"]
 
     elif stage <= 6:
-        available = [
-            "slime",
-            "skeleton",
-            "orc"
-        ]
+        available = ["slime", "skeleton", "orc"]
 
     elif stage <= 10:
-        available = [
-            "skeleton",
-            "orc",
-            "archer"
-        ]
+        available = ["skeleton", "orc", "archer"]
 
     elif stage <= 14:
-        available = [
-            "archer",
-            "fire_mage",
-            "jumper",
-            "ghost"
-        ]
+        available = ["archer", "fire_mage", "jumper", "ghost"]
 
     else:
         available = [
@@ -1200,11 +962,9 @@ def create_level(stage):
             "kind": kind,
             "path_timer": random.random(),
             "path": [],
-            "attack_cd": random.uniform(1.5, 3.5),
-            "attack": 0
+            "attack_cd": random.uniform(1.5, 3.5)
         })
 
-    # Coins
     for _ in range(5 + stage // 2):
         coin_rect = random_open_tile(occupied, reachable)
 
@@ -1217,6 +977,9 @@ def create_level(stage):
 
         occupied.append(coin_rect)
         coins.append(coin_rect)
+
+    # Choose an ability at the beginning of the level
+    prepare_ability_selection()
 
 
 # ==================================================
@@ -1268,7 +1031,7 @@ def update_enemy_path(enemy, dt):
 
 
 # ==================================================
-# DAMAGE SYSTEM
+# DAMAGE
 # ==================================================
 
 def damage_player(amount=1):
@@ -1293,7 +1056,6 @@ def enemy_attack(enemy):
     kind = enemy["kind"]
     rect = enemy["rect"]
 
-    # ARCHER: arrow
     if kind == "archer":
         dx = player.centerx - rect.centerx
         dy = player.centery - rect.centery
@@ -1308,7 +1070,6 @@ def enemy_attack(enemy):
             "type": "arrow"
         })
 
-    # FIRE MAGE: fire on player's tile
     elif kind == "fire_mage":
         target = pygame.Rect(
             (player.centerx // TILE) * TILE,
@@ -1323,7 +1084,6 @@ def enemy_attack(enemy):
             "type": "fire"
         })
 
-    # JUMPER: jump attack
     elif kind == "jumper":
         target = pygame.Rect(
             (player.centerx // TILE) * TILE,
@@ -1338,12 +1098,10 @@ def enemy_attack(enemy):
             "type": "jump"
         })
 
-    # BRUTE: heavy nearby attack
     elif kind == "brute":
         if rect.inflate(35, 35).colliderect(player):
-            damage_player(1)
+            damage_player()
 
-    # DEMON: fireball
     elif kind == "demon":
         dx = player.centerx - rect.centerx
         dy = player.centery - rect.centery
@@ -1360,25 +1118,19 @@ def enemy_attack(enemy):
 
 
 def update_enemy_attacks(dt):
-    # Attack cooldowns
     for enemy in enemies:
         enemy["attack_cd"] -= dt
 
         if enemy["attack_cd"] <= 0:
             enemy_attack(enemy)
 
-            # Higher levels attack faster
-            cooldown = max(
-                0.65,
-                3.0 - level * 0.09
-            )
+            cooldown = max(0.65, 3.0 - level * 0.09)
 
             enemy["attack_cd"] = random.uniform(
                 cooldown,
                 cooldown + 1.0
             )
 
-    # Update projectiles
     for projectile in enemy_projectiles[:]:
         projectile["x"] += projectile["dx"] * dt
         projectile["y"] += projectile["dy"] * dt
@@ -1392,7 +1144,6 @@ def update_enemy_attacks(dt):
 
         if projectile_rect.colliderect(player):
             damage_player()
-
             enemy_projectiles.remove(projectile)
             continue
 
@@ -1404,7 +1155,6 @@ def update_enemy_attacks(dt):
         ):
             enemy_projectiles.remove(projectile)
 
-    # Warning zones
     for warning in warning_zones[:]:
         warning["timer"] -= dt
 
@@ -1416,7 +1166,7 @@ def update_enemy_attacks(dt):
 
 
 # ==================================================
-# GAME STATE FUNCTIONS
+# GAME STATE
 # ==================================================
 
 def restart_at_checkpoint():
@@ -1424,7 +1174,8 @@ def restart_at_checkpoint():
     global shoot_timer, damage_timer
 
     level = checkpoint
-    lives = 3
+
+    lives = min(3, abilities["max_lives"])
     has_key = False
     game_state = "playing"
 
@@ -1439,7 +1190,7 @@ def restart_at_checkpoint():
 
 def start_new_run():
     global level, checkpoint, lives, score
-    global has_key, game_state
+    global has_key, game_state, facing
 
     level = 1
     checkpoint = 1
@@ -1447,6 +1198,13 @@ def start_new_run():
     score = 0
     has_key = False
     game_state = "playing"
+    facing = 0
+
+    abilities["damage"] = 1
+    abilities["speed"] = 235
+    abilities["fire_rate"] = 0.20
+    abilities["multishot"] = 1
+    abilities["max_lives"] = 3
 
     save_game()
     restart_at_checkpoint()
@@ -1461,7 +1219,7 @@ def save_checkpoint_if_needed():
 
 
 # ==================================================
-# CREATE FIRST LEVEL
+# FIRST LEVEL
 # ==================================================
 
 create_level(level)
@@ -1473,19 +1231,30 @@ create_level(level)
 while True:
     dt = clock.tick(FPS) / 1000
 
-    # ------------------------------------------------
     # EVENTS
-    # ------------------------------------------------
-
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             pygame.quit()
             sys.exit()
 
         if event.type == pygame.KEYDOWN:
+
             if event.key == pygame.K_ESCAPE:
                 pygame.quit()
                 sys.exit()
+
+            if game_state == "choosing":
+                if event.key == pygame.K_1:
+                    choose_ability(0)
+
+                elif event.key == pygame.K_2:
+                    choose_ability(1)
+
+                elif event.key == pygame.K_3:
+                    choose_ability(2)
+
+                elif event.key == pygame.K_RETURN:
+                    game_state = "playing"
 
             if (
                 event.key == pygame.K_r
@@ -1493,36 +1262,66 @@ while True:
             ):
                 start_new_run()
 
-            if (
-                event.key == pygame.K_c
-                and game_state == "lost"
-            ):
+            if event.key == pygame.K_c and game_state == "lost":
                 restart_at_checkpoint()
 
+            # Shoot in the direction player is facing
             if (
                 event.key == pygame.K_SPACE
                 and game_state == "playing"
                 and shoot_timer <= 0
             ):
-                bullet = pygame.Rect(
-                    player.centerx + facing * 17,
-                    player.centery - 4,
-                    16,
-                    8
-                )
 
-                bullets.append({
-                    "rect": bullet,
-                    "dx": facing * 9
-                })
+                for shot in range(abilities["multishot"]):
+                    bullet = pygame.Rect(
+                        player.centerx - 6,
+                        player.centery - 4,
+                        16,
+                        8
+                    )
 
-                shoot_timer = 0.20
+                    if facing == 0:
+                        bullet.center = (
+                            player.right + 8,
+                            player.centery
+                        )
+                        dx, dy = 9, 0
 
-    # ------------------------------------------------
+                    elif facing == 1:
+                        bullet.center = (
+                            player.left - 8,
+                            player.centery
+                        )
+                        dx, dy = -9, 0
+
+                    elif facing == 2:
+                        bullet.center = (
+                            player.centerx,
+                            player.top - 8
+                        )
+                        dx, dy = 0, -9
+
+                    else:
+                        bullet.center = (
+                            player.centerx,
+                            player.bottom + 8
+                        )
+                        dx, dy = 0, 9
+
+                    bullets.append({
+                        "rect": bullet,
+                        "dx": dx,
+                        "dy": dy
+                    })
+
+                shoot_timer = abilities["fire_rate"]
+
+    # ==================================================
     # UPDATE
-    # ------------------------------------------------
+    # ==================================================
 
     if game_state == "playing":
+
         shoot_timer = max(0, shoot_timer - dt)
         damage_timer = max(0, damage_timer - dt)
 
@@ -1540,28 +1339,38 @@ while True:
             keys[pygame.K_w] or keys[pygame.K_UP]
         )
 
-        if dx:
-            facing = 1 if dx > 0 else -1
+        # Direction follows movement
+        if dx > 0:
+            facing = 0
+
+        elif dx < 0:
+            facing = 1
+
+        elif dy < 0:
+            facing = 2
+
+        elif dy > 0:
+            facing = 3
 
         if dx or dy:
             length = math.hypot(dx, dy)
 
             move_solid(
                 player,
-                dx / length * 235 * dt,
-                dy / length * 235 * dt
+                dx / length * abilities["speed"] * dt,
+                dy / length * abilities["speed"] * dt
             )
 
-        # --------------------------------------------
         # PLAYER BULLETS
-        # --------------------------------------------
-
         for bullet in bullets[:]:
             bullet["rect"].x += bullet["dx"]
+            bullet["rect"].y += bullet["dy"]
 
             if (
                 bullet["rect"].right < 0
                 or bullet["rect"].left > WIDTH
+                or bullet["rect"].bottom < 0
+                or bullet["rect"].top > ROWS * TILE
                 or tile_blocked(bullet["rect"])
             ):
                 bullets.remove(bullet)
@@ -1571,7 +1380,7 @@ while True:
 
             for enemy in enemies[:]:
                 if bullet["rect"].colliderect(enemy["rect"]):
-                    enemy["hp"] -= 1
+                    enemy["hp"] -= abilities["damage"]
                     hit = True
 
                     if enemy["hp"] <= 0:
@@ -1593,23 +1402,14 @@ while True:
             if hit and bullet in bullets:
                 bullets.remove(bullet)
 
-        # --------------------------------------------
         # ENEMY MOVEMENT
-        # --------------------------------------------
-
         for enemy in enemies:
             update_enemy_path(enemy, dt)
 
-        # --------------------------------------------
         # ENEMY ATTACKS
-        # --------------------------------------------
-
         update_enemy_attacks(dt)
 
-        # --------------------------------------------
         # CONTACT DAMAGE
-        # --------------------------------------------
-
         for enemy in enemies:
             if player.colliderect(enemy["rect"]):
                 if damage_timer <= 0:
@@ -1618,10 +1418,7 @@ while True:
                     vx = player.centerx - enemy["rect"].centerx
                     vy = player.centery - enemy["rect"].centery
 
-                    distance = max(
-                        1,
-                        math.hypot(vx, vy)
-                    )
+                    distance = max(1, math.hypot(vx, vy))
 
                     player.x += int(vx / distance * 30)
                     player.y += int(vy / distance * 30)
@@ -1633,32 +1430,24 @@ while True:
                         ROWS * TILE - TILE * 2
                     ))
 
-        # --------------------------------------------
         # KEY
-        # --------------------------------------------
-
         if not has_key and player.colliderect(key_rect):
             has_key = True
             score += 100
 
-        # --------------------------------------------
         # COINS
-        # --------------------------------------------
-
         for coin in coins[:]:
             if player.colliderect(coin):
                 coins.remove(coin)
                 score += 10
 
-        # --------------------------------------------
         # EXIT
-        # --------------------------------------------
-
         if (
             player.colliderect(exit_rect)
             and has_key
             and not enemies
         ):
+
             if level >= 20:
                 game_state = "won_all"
 
@@ -1673,7 +1462,7 @@ while True:
                 best_level = max(best_level, level)
 
                 has_key = False
-                lives = min(3, lives + 1)
+                lives = min(abilities["max_lives"], lives + 1)
 
                 player.x = 2 * TILE + 8
                 player.y = 2 * TILE + 8
@@ -1683,16 +1472,13 @@ while True:
                 save_checkpoint_if_needed()
                 save_game()
 
-    # ------------------------------------------------
+    # ==================================================
     # DRAW
-    # ------------------------------------------------
+    # ==================================================
 
     draw_map()
 
-    # --------------------------------------------
     # EXIT
-    # --------------------------------------------
-
     pygame.draw.rect(
         screen,
         (75, 45, 35),
@@ -1700,11 +1486,7 @@ while True:
         border_radius=5
     )
 
-    exit_color = (
-        GREEN
-        if has_key and not enemies
-        else RED
-    )
+    exit_color = GREEN if has_key and not enemies else RED
 
     pygame.draw.rect(
         screen,
@@ -1721,31 +1503,14 @@ while True:
     pygame.draw.circle(
         screen,
         GOLD,
-        (
-            exit_rect.right - 10,
-            exit_rect.centery
-        ),
+        (exit_rect.right - 10, exit_rect.centery),
         3
     )
 
-    # --------------------------------------------
     # KEY
-    # --------------------------------------------
-
     if not has_key:
-        pygame.draw.circle(
-            screen,
-            GOLD,
-            key_rect.center,
-            10
-        )
-
-        pygame.draw.circle(
-            screen,
-            (255, 240, 160),
-            key_rect.center,
-            4
-        )
+        pygame.draw.circle(screen, GOLD, key_rect.center, 10)
+        pygame.draw.circle(screen, (255, 240, 160), key_rect.center, 4)
 
         pygame.draw.rect(
             screen,
@@ -1769,29 +1534,12 @@ while True:
             )
         )
 
-    # --------------------------------------------
     # COINS
-    # --------------------------------------------
-
     for coin in coins:
-        pygame.draw.circle(
-            screen,
-            GOLD,
-            coin.center,
-            8
-        )
+        pygame.draw.circle(screen, GOLD, coin.center, 8)
+        pygame.draw.circle(screen, (255, 240, 160), coin.center, 3)
 
-        pygame.draw.circle(
-            screen,
-            (255, 240, 160),
-            coin.center,
-            3
-        )
-
-    # --------------------------------------------
     # PLAYER BULLETS
-    # --------------------------------------------
-
     for bullet in bullets:
         pygame.draw.rect(
             screen,
@@ -1800,95 +1548,47 @@ while True:
             border_radius=4
         )
 
-        pygame.draw.rect(
-            screen,
-            WHITE,
-            (
-                bullet["rect"].x + 3,
-                bullet["rect"].y + 2,
-                5,
-                3
-            ),
-            border_radius=2
-        )
-
-    # --------------------------------------------
     # ENEMY PROJECTILES
-    # --------------------------------------------
-
     for projectile in enemy_projectiles:
-        if projectile["type"] == "arrow":
-            color = (220, 220, 230)
-        else:
-            color = ORANGE
+        color = (
+            (220, 220, 230)
+            if projectile["type"] == "arrow"
+            else ORANGE
+        )
 
         pygame.draw.circle(
             screen,
             color,
-            (
-                int(projectile["x"]),
-                int(projectile["y"])
-            ),
+            (int(projectile["x"]), int(projectile["y"])),
             7
         )
 
-    # --------------------------------------------
     # WARNING ZONES
-    # --------------------------------------------
-
     for warning in warning_zones:
         rect = warning["rect"]
 
-        # Red warning tile
-        pygame.draw.rect(
-            screen,
-            (210, 30, 40),
-            rect
-        )
+        pygame.draw.rect(screen, (210, 30, 40), rect)
+        pygame.draw.rect(screen, (255, 100, 100), rect, 3)
 
-        pygame.draw.rect(
-            screen,
-            (255, 100, 100),
-            rect,
-            3
-        )
-
-        # Countdown bar
-        bar_width = int(
-            TILE * warning["timer"] / 0.85
-        )
+        bar_width = int(TILE * warning["timer"] / 0.85)
 
         pygame.draw.rect(
             screen,
             WHITE,
-            (
-                rect.x,
-                rect.y,
-                bar_width,
-                5
-            )
+            (rect.x, rect.y, bar_width, 5)
         )
 
-    # --------------------------------------------
     # ENEMIES
-    # --------------------------------------------
-
     for enemy in enemies:
         draw_monster(enemy)
 
-    # --------------------------------------------
     # PLAYER
-    # --------------------------------------------
-
-    if (
-        damage_timer <= 0
-        or int(damage_timer * 12) % 2 == 0
-    ):
+    if damage_timer <= 0 or int(damage_timer * 12) % 2 == 0:
         draw_player(player, facing)
 
-    # ------------------------------------------------
+    # ==================================================
     # HUD
-    # ------------------------------------------------
+    # ==================================================
 
     hud_y = ROWS * TILE
 
@@ -1962,9 +1662,16 @@ while True:
         hud_y + 52
     )
 
-    # ------------------------------------------------
+    # ==================================================
+    # ABILITY MENU
+    # ==================================================
+
+    if game_state == "choosing":
+        draw_ability_menu()
+
+    # ==================================================
     # END SCREENS
-    # ------------------------------------------------
+    # ==================================================
 
     if game_state in ("lost", "won_all"):
         overlay = pygame.Surface(
