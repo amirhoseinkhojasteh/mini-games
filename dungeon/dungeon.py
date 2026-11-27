@@ -2,1749 +2,1504 @@ import pygame
 import random
 import math
 import json
+import os
 import sys
-from collections import deque
+from dataclasses import dataclass
 
 pygame.init()
 
-# ==================================================
-# SETTINGS
-# ==================================================
-
-TILE = 40
-COLS = 22
-ROWS = 16
-HUD_H = 100
-
-WIDTH = COLS * TILE
-HEIGHT = ROWS * TILE + HUD_H
-
+WIDTH = 1000
+HEIGHT = 700
 FPS = 60
-SAVE_FILE = "savegame.json"
+TILE = 32
+GRAVITY = 0.65
+SAVE_PATH = "savegame.json"
+RECORD_PATH = "leaderboard.json"
+ASSET_PATH = "assets"
 
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Dungeon Escape - Ultimate")
+pygame.display.set_caption("Dungeon Escape")
 clock = pygame.time.Clock()
 
-FONT = pygame.font.SysFont("segoeui", 22, bold=True)
-SMALL = pygame.font.SysFont("segoeui", 16, bold=True)
-BIG = pygame.font.SysFont("segoeui", 44, bold=True)
+FONT = pygame.font.SysFont("consolas", 20)
+SMALL = pygame.font.SysFont("consolas", 15)
+BIG = pygame.font.SysFont("consolas", 48, bold=True)
 
-# ==================================================
-# COLORS
-# ==================================================
+WHITE = (240, 240, 240)
+BLACK = (15, 18, 25)
+GREEN = (80, 220, 100)
+RED = (240, 75, 75)
+BLUE = (80, 160, 255)
+YELLOW = (255, 220, 80)
+PURPLE = (190, 90, 255)
+ORANGE = (255, 145, 55)
+CYAN = (70, 220, 230)
 
-WHITE = (240, 245, 255)
-BLACK = (10, 10, 15)
-GOLD = (255, 204, 55)
-GREEN = (70, 225, 145)
-RED = (240, 70, 100)
-BLUE = (65, 165, 255)
-CYAN = (130, 220, 255)
-ORANGE = (255, 120, 30)
 
-# ==================================================
-# THEMES
-# ==================================================
+def clamp(value, low, high):
+    return max(low, min(value, high))
 
-THEMES = {
-    "DESERT": {
-        "floor1": (190, 145, 75),
-        "floor2": (210, 165, 95),
-        "wall": (110, 72, 38),
-        "edge": (160, 110, 60),
-        "obstacles": ["C", "R", "R", "B"]
-    },
-    "FOREST": {
-        "floor1": (35, 85, 48),
-        "floor2": (45, 105, 58),
-        "wall": (55, 45, 30),
-        "edge": (100, 75, 45),
-        "obstacles": ["T", "T", "B", "R"]
-    },
-    "CAVE": {
-        "floor1": (45, 48, 62),
-        "floor2": (55, 58, 75),
-        "wall": (30, 32, 42),
-        "edge": (95, 100, 125),
-        "obstacles": ["R", "R", "W"]
-    },
-    "ICE": {
-        "floor1": (115, 170, 205),
-        "floor2": (140, 195, 225),
-        "wall": (55, 95, 140),
-        "edge": (180, 225, 255),
-        "obstacles": ["I", "I", "R", "W"]
-    },
-    "RUINS": {
-        "floor1": (90, 85, 70),
-        "floor2": (110, 105, 85),
-        "wall": (50, 48, 42),
-        "edge": (145, 135, 110),
-        "obstacles": ["R", "P", "B", "R"]
-    }
-}
 
-THEME_NAMES = list(THEMES.keys())
-
-# ==================================================
-# SAVE SYSTEM
-# ==================================================
-
-def load_save():
+def load_json(path, default):
     try:
-        with open(SAVE_FILE, "r", encoding="utf-8") as file:
-            data = json.load(file)
-
-        checkpoint = int(data.get("checkpoint", 1))
-        best_level = int(data.get("best_level", 1))
-        best_score = int(data.get("best_score", 0))
-
-        checkpoint = max(1, min(20, checkpoint))
-
-        return checkpoint, best_level, best_score
-
-    except (FileNotFoundError, json.JSONDecodeError,
-            ValueError, TypeError):
-        return 1, 1, 0
+        with open(path, "r", encoding="utf-8") as file:
+            return json.load(file)
+    except (OSError, json.JSONDecodeError):
+        return default
 
 
-def save_game():
-    data = {
-        "checkpoint": checkpoint,
-        "best_level": best_level,
-        "best_score": best_score
-    }
-
+def save_json(path, data):
     try:
-        with open(SAVE_FILE, "w", encoding="utf-8") as file:
-            json.dump(data, file, indent=4)
+        with open(path, "w", encoding="utf-8") as file:
+            json.dump(data, file, indent=4, ensure_ascii=False)
     except OSError:
         pass
 
 
-saved_checkpoint, best_level, best_score = load_save()
-
-# ==================================================
-# GLOBAL VARIABLES
-# ==================================================
-
-world = []
-current_theme = "DESERT"
-
-player = pygame.Rect(
-    2 * TILE + 8,
-    2 * TILE + 8,
-    25,
-    30
-)
-
-# 0 = Right, 1 = Left, 2 = Up, 3 = Down
-facing = 0
-
-level = saved_checkpoint
-checkpoint = saved_checkpoint
-
-score = 0
-lives = 3
-has_key = False
-
-game_state = "playing"
-
-shoot_timer = 0
-damage_timer = 0
-
-enemies = []
-bullets = []
-coins = []
-
-enemy_projectiles = []
-warning_zones = []
-
-key_rect = pygame.Rect(0, 0, 20, 20)
-exit_rect = pygame.Rect(0, 0, TILE, TILE)
-
-# ==================================================
-# ABILITIES
-# ==================================================
-
-abilities = {
-    "damage": 1,
-    "speed": 235,
-    "fire_rate": 0.20,
-    "multishot": 1,
-    "max_lives": 3
-}
-
-ability_options = []
-ability_prices = []
-
-ABILITY_POOL = [
-    {
-        "name": "POWER SHOT",
-        "description": "Increase bullet damage",
-        "price": 150,
-        "type": "damage"
-    },
-    {
-        "name": "FAST RUNNER",
-        "description": "Increase movement speed",
-        "price": 120,
-        "type": "speed"
-    },
-    {
-        "name": "RAPID FIRE",
-        "description": "Shoot faster",
-        "price": 180,
-        "type": "fire_rate"
-    },
-    {
-        "name": "DOUBLE SHOT",
-        "description": "Shoot more bullets",
-        "price": 250,
-        "type": "multishot"
-    },
-    {
-        "name": "EXTRA LIFE",
-        "description": "Increase maximum lives",
-        "price": 300,
-        "type": "max_lives"
-    }
-]
+def text(surface, value, x, y, color=WHITE, font=FONT):
+    image = font.render(str(value), True, color)
+    surface.blit(image, (int(x), int(y)))
 
 
-def prepare_ability_selection():
-    global ability_options, ability_prices, game_state
-
-    ability_options = random.sample(ABILITY_POOL, 3)
-
-    ability_prices = [
-        ability["price"] + (level - 1) * 20
-        for ability in ability_options
-    ]
-
-    game_state = "choosing"
+def centered_text(surface, value, y, color=WHITE, font=FONT):
+    image = font.render(str(value), True, color)
+    surface.blit(image, (WIDTH // 2 - image.get_width() // 2, y))
 
 
-def choose_ability(index):
-    global score, game_state, lives
+def image_load(name, size=None):
+    path = os.path.join(ASSET_PATH, name)
+    if not os.path.isfile(path):
+        return None
+    try:
+        image = pygame.image.load(path).convert_alpha()
+        if size:
+            image = pygame.transform.scale(image, size)
+        return image
+    except pygame.error:
+        return None
 
-    if not 0 <= index < len(ability_options):
-        return
 
-    ability = ability_options[index]
-    price = ability_prices[index]
+class Assets:
+    def __init__(self):
+        self.player = image_load("player.png", (32, 42))
+        self.slime = image_load("slime.png", (32, 30))
+        self.archer = image_load("archer.png", (32, 42))
+        self.mage = image_load("mage.png", (32, 42))
+        self.poison = image_load("poison.png", (32, 42))
+        self.jumper = image_load("jumper.png", (32, 38))
+        self.brute = image_load("brute.png", (44, 48))
+        self.tileset = image_load("tileset.png")
+        self.background = image_load("background.png")
+        self.coin = image_load("coin.png", (20, 20))
+        self.heart = image_load("heart.png", (22, 22))
+        self.key = image_load("key.png", (24, 24))
+        self.exit = image_load("exit.png", (48, 64))
 
-    if score < price:
-        return
+        self.tiles = {}
 
-    score -= price
+        if self.tileset:
+            width, height = self.tileset.get_size()
+            columns = width // TILE
+            rows = height // TILE
 
-    kind = ability["type"]
+            for row in range(rows):
+                for column in range(columns):
+                    rect = pygame.Rect(
+                        column * TILE,
+                        row * TILE,
+                        TILE,
+                        TILE
+                    )
+                    self.tiles[(column, row)] = self.tileset.subsurface(rect)
 
-    if kind == "damage":
-        abilities["damage"] += 1
 
-    elif kind == "speed":
-        abilities["speed"] += 35
+ASSETS = Assets()
 
-    elif kind == "fire_rate":
-        abilities["fire_rate"] = max(
-            0.06,
-            abilities["fire_rate"] - 0.04
+
+@dataclass
+class Camera:
+    x: float = 0
+    y: float = 0
+
+    def follow(self, target, level_width, level_height):
+        self.x = clamp(
+            target.centerx - WIDTH // 2,
+            0,
+            max(0, level_width - WIDTH)
         )
 
-    elif kind == "multishot":
-        abilities["multishot"] += 1
-
-    elif kind == "max_lives":
-        abilities["max_lives"] += 1
-        lives += 1
-
-    game_state = "playing"
-
-
-def draw_ability_menu():
-    overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
-    overlay.fill((5, 7, 15, 235))
-    screen.blit(overlay, (0, 0))
-
-    draw_text(
-        "CHOOSE YOUR ABILITY",
-        BIG,
-        GOLD,
-        WIDTH // 2,
-        170,
-        center=True
-    )
-
-    draw_text(
-        f"YOUR SCORE: {score}",
-        FONT,
-        CYAN,
-        WIDTH // 2,
-        225,
-        center=True
-    )
-
-    for i, ability in enumerate(ability_options):
-        box = pygame.Rect(
-            35 + i * 275,
-            300,
-            250,
-            230
+        self.y = clamp(
+            target.centery - HEIGHT // 2,
+            0,
+            max(0, level_height - HEIGHT)
         )
 
-        pygame.draw.rect(
-            screen,
-            (25, 32, 55),
-            box,
-            border_radius=12
+    def apply(self, rect):
+        return pygame.Rect(
+            rect.x - int(self.x),
+            rect.y - int(self.y),
+            rect.width,
+            rect.height
         )
 
-        pygame.draw.rect(
-            screen,
-            BLUE,
-            box,
-            3,
-            border_radius=12
-        )
 
-        draw_text(
-            f"[{i + 1}]",
-            BIG,
-            GOLD,
-            box.centerx,
-            box.y + 35,
-            center=True
-        )
-
-        draw_text(
-            ability["name"],
-            FONT,
-            CYAN,
-            box.centerx,
-            box.y + 90,
-            center=True
-        )
-
-        draw_text(
-            ability["description"],
-            SMALL,
-            WHITE,
-            box.centerx,
-            box.y + 130,
-            center=True
-        )
-
-        price = ability_prices[i]
-
-        draw_text(
-            f"PRICE: {price}",
-            FONT,
-            GREEN if score >= price else RED,
-            box.centerx,
-            box.y + 175,
-            center=True
-        )
-
-    draw_text(
-        "PRESS 1, 2 OR 3 TO BUY",
-        SMALL,
-        WHITE,
-        WIDTH // 2,
-        590,
-        center=True
-    )
-
-    draw_text(
-        "You can skip with ENTER",
-        SMALL,
-        CYAN,
-        WIDTH // 2,
-        620,
-        center=True
-    )
-
-
-# ==================================================
-# TEXT
-# ==================================================
-
-def draw_text(text, font, color, x, y, center=False):
-    image = font.render(str(text), True, color)
-    rect = image.get_rect()
-
-    if center:
-        rect.center = (x, y)
-    else:
-        rect.topleft = (x, y)
-
-    screen.blit(image, rect)
-
-
-# ==================================================
-# COLLISION
-# ==================================================
-
-def tile_blocked(rect):
-    left = max(0, rect.left // TILE)
-    right = min(COLS - 1, (rect.right - 1) // TILE)
-
-    top = max(0, rect.top // TILE)
-    bottom = min(ROWS - 1, (rect.bottom - 1) // TILE)
-
-    for y in range(top, bottom + 1):
-        for x in range(left, right + 1):
-            if world[y][x] != ".":
-                return True
-
-    return False
-
-
-def move_solid(rect, dx, dy):
-    mx = round(dx)
-    my = round(dy)
-
-    if mx == 0 and dx != 0:
-        mx = 1 if dx > 0 else -1
-
-    if my == 0 and dy != 0:
-        my = 1 if dy > 0 else -1
-
-    rect.x += mx
-
-    if tile_blocked(rect):
-        rect.x -= mx
-
-    rect.y += my
-
-    if tile_blocked(rect):
-        rect.y -= my
-
-
-# ==================================================
-# PATHFINDING
-# ==================================================
-
-def get_reachable_tiles(start):
-    queue = deque([start])
-    visited = {start}
-
-    directions = [(1, 0), (-1, 0), (0, 1), (0, -1)]
-
-    while queue:
-        x, y = queue.popleft()
-
-        for dx, dy in directions:
-            nx = x + dx
-            ny = y + dy
-
-            if not (0 <= nx < COLS and 0 <= ny < ROWS):
-                continue
-
-            if world[ny][nx] != ".":
-                continue
-
-            if (nx, ny) not in visited:
-                visited.add((nx, ny))
-                queue.append((nx, ny))
-
-    return visited
-
-
-def find_path(start, goal):
-    if start == goal:
-        return []
-
-    queue = deque([start])
-    came_from = {start: None}
-
-    directions = [(1, 0), (-1, 0), (0, 1), (0, -1)]
-
-    while queue:
-        current = queue.popleft()
-
-        if current == goal:
-            break
-
-        for dx, dy in directions:
-            nxt = (current[0] + dx, current[1] + dy)
-
-            if not (
-                0 <= nxt[0] < COLS
-                and 0 <= nxt[1] < ROWS
-            ):
-                continue
-
-            if world[nxt[1]][nxt[0]] != ".":
-                continue
-
-            if nxt not in came_from:
-                came_from[nxt] = current
-                queue.append(nxt)
-
-    if goal not in came_from:
-        return []
-
-    path = []
-    current = goal
-
-    while current != start:
-        path.append(current)
-        current = came_from[current]
-
-    path.reverse()
-    return path
-
-
-# ==================================================
-# MAP GENERATION
-# ==================================================
-
-def make_map(stage):
-    global world, current_theme
-
-    current_theme = THEME_NAMES[
-        (stage - 1) % len(THEME_NAMES)
-    ]
-
-    theme = THEMES[current_theme]
-
-    world = [
-        ["." for _ in range(COLS)]
-        for _ in range(ROWS)
-    ]
-
-    for y in range(ROWS):
-        for x in range(COLS):
-            if (
-                x == 0 or y == 0
-                or x == COLS - 1
-                or y == ROWS - 1
-            ):
-                world[y][x] = "#"
-
-    spawn = (2, 2)
-    exit_tile = (COLS - 3, ROWS - 3)
-
-    obstacle_count = min(15 + stage * 2, 60)
-
-    for _ in range(obstacle_count):
-        x = random.randint(2, COLS - 3)
-        y = random.randint(2, ROWS - 3)
-
-        if abs(x - spawn[0]) <= 2 and abs(y - spawn[1]) <= 2:
-            continue
-
-        if abs(x - exit_tile[0]) <= 2 and abs(y - exit_tile[1]) <= 2:
-            continue
-
-        world[y][x] = random.choice(theme["obstacles"])
-
-    for y in range(1, 5):
-        for x in range(1, 5):
-            world[y][x] = "."
-
-    for y in range(ROWS - 5, ROWS - 1):
-        for x in range(COLS - 5, COLS - 1):
-            world[y][x] = "."
-
-    x, y = spawn
-
-    while x != exit_tile[0]:
-        x += 1 if x < exit_tile[0] else -1
-        world[y][x] = "."
-
-    while y != exit_tile[1]:
-        y += 1 if y < exit_tile[1] else -1
-        world[y][x] = "."
-
-    return get_reachable_tiles(spawn)
-
-
-# ==================================================
-# MAP DRAWING
-# ==================================================
-
-def draw_map():
-    theme = THEMES[current_theme]
-    screen.fill((12, 14, 25))
-
-    for y in range(ROWS):
-        for x in range(COLS):
-            tile = pygame.Rect(
-                x * TILE,
-                y * TILE,
-                TILE,
-                TILE
+class Particle:
+    def __init__(self, x, y, color, count=8):
+        self.particles = []
+
+        for _ in range(count):
+            angle = random.random() * math.tau
+            speed = random.uniform(1, 4)
+
+            self.particles.append({
+                "x": float(x),
+                "y": float(y),
+                "vx": math.cos(angle) * speed,
+                "vy": math.sin(angle) * speed,
+                "life": random.randint(15, 35),
+                "color": color,
+                "size": random.randint(2, 5)
+            })
+
+    def update(self):
+        for particle in self.particles:
+            particle["x"] += particle["vx"]
+            particle["y"] += particle["vy"]
+            particle["vy"] += 0.1
+            particle["life"] -= 1
+
+        self.particles = [
+            particle for particle in self.particles
+            if particle["life"] > 0
+        ]
+
+    def draw(self, camera):
+        for particle in self.particles:
+            pygame.draw.rect(
+                screen,
+                particle["color"],
+                (
+                    int(particle["x"] - camera.x),
+                    int(particle["y"] - camera.y),
+                    particle["size"],
+                    particle["size"]
+                )
             )
 
-            kind = world[y][x]
 
-            if kind == ".":
-                color = (
-                    theme["floor1"]
-                    if (x + y) % 2 == 0
-                    else theme["floor2"]
+class Tile:
+    def __init__(self, x, y, kind="ground"):
+        self.rect = pygame.Rect(x, y, TILE, TILE)
+        self.kind = kind
+
+    @property
+    def solid(self):
+        return self.kind in ("ground", "stone", "platform")
+
+    def draw(self, camera):
+        rect = camera.apply(self.rect)
+
+        if self.kind == "ground":
+            pygame.draw.rect(screen, (75, 110, 50), rect)
+            pygame.draw.rect(
+                screen,
+                (125, 185, 75),
+                (rect.x, rect.y, rect.width, 8)
+            )
+            pygame.draw.rect(
+                screen,
+                (75, 65, 45),
+                (rect.x, rect.y + 8, rect.width, rect.height - 8)
+            )
+
+        elif self.kind == "stone":
+            pygame.draw.rect(screen, (80, 85, 100), rect)
+            pygame.draw.rect(
+                screen,
+                (115, 120, 135),
+                (rect.x + 3, rect.y + 3, 12, 5)
+            )
+            pygame.draw.rect(
+                screen,
+                (55, 60, 75),
+                (rect.x + 18, rect.y + 18, 10, 5)
+            )
+
+        elif self.kind == "platform":
+            pygame.draw.rect(
+                screen,
+                (105, 75, 45),
+                (rect.x, rect.y + 5, rect.width, rect.height - 5)
+            )
+            pygame.draw.rect(
+                screen,
+                (135, 195, 80),
+                (rect.x, rect.y, rect.width, 7)
+            )
+
+        elif self.kind == "tree":
+            pygame.draw.rect(
+                screen,
+                (95, 60, 35),
+                (rect.x + 13, rect.y + 15, 8, 25)
+            )
+            pygame.draw.circle(
+                screen,
+                (30, 105, 45),
+                (rect.centerx, rect.y + 8),
+                20
+            )
+            pygame.draw.circle(
+                screen,
+                (45, 145, 55),
+                (rect.x + 8, rect.y + 10),
+                13
+            )
+
+        elif self.kind == "decoration":
+            pygame.draw.circle(
+                screen,
+                (60, 125, 60),
+                rect.center,
+                10
+            )
+
+
+class Coin:
+    def __init__(self, x, y):
+        self.rect = pygame.Rect(x, y, 20, 20)
+        self.phase = random.random() * math.tau
+
+    def draw(self, camera):
+        rect = camera.apply(self.rect)
+        bob = math.sin(pygame.time.get_ticks() / 180 + self.phase) * 3
+
+        if ASSETS.coin:
+            screen.blit(ASSETS.coin, (rect.x, rect.y + bob))
+        else:
+            pygame.draw.circle(
+                screen,
+                YELLOW,
+                (rect.centerx, int(rect.centery + bob)),
+                9
+            )
+            pygame.draw.circle(
+                screen,
+                ORANGE,
+                (rect.centerx, int(rect.centery + bob)),
+                5,
+                2
+            )
+
+
+class Player:
+    def __init__(self):
+        self.rect = pygame.Rect(80, 450, 30, 42)
+        self.x = float(self.rect.x)
+        self.y = float(self.rect.y)
+
+        self.vx = 0
+        self.vy = 0
+
+        self.speed = 5
+        self.jump_power = 13
+
+        self.facing = 1
+        self.facing_y = 0
+
+        self.health = 5
+        self.max_health = 5
+
+        self.invincible = 0
+        self.on_ground = False
+        self.crouching = False
+
+        self.damage = 1
+        self.jump_bonus = 0
+        self.coins = 0
+
+        self.animation_time = 0
+        self.attack_cooldown = 0
+
+    def move_horizontal(self, tiles):
+        self.x += self.vx
+        self.rect.x = int(self.x)
+
+        for tile in tiles:
+            if not tile.solid:
+                continue
+
+            if self.rect.colliderect(tile.rect):
+                if self.vx > 0:
+                    self.rect.right = tile.rect.left
+                elif self.vx < 0:
+                    self.rect.left = tile.rect.right
+
+                self.x = float(self.rect.x)
+
+    def move_vertical(self, tiles):
+        self.y += self.vy
+        self.rect.y = int(self.y)
+
+        self.on_ground = False
+
+        for tile in tiles:
+            if not tile.solid:
+                continue
+
+            if self.rect.colliderect(tile.rect):
+                if self.vy > 0:
+                    self.rect.bottom = tile.rect.top
+                    self.on_ground = True
+                elif self.vy < 0:
+                    self.rect.top = tile.rect.bottom
+
+                self.vy = 0
+                self.y = float(self.rect.y)
+
+    def update(self, keys, tiles):
+        self.vx = 0
+        self.crouching = False
+
+        if keys[pygame.K_LEFT]:
+            self.vx = -self.speed
+            self.facing = -1
+            self.facing_y = 0
+
+        if keys[pygame.K_RIGHT]:
+            self.vx = self.speed
+            self.facing = 1
+            self.facing_y = 0
+
+        if keys[pygame.K_UP]:
+            self.facing_y = -1
+
+        if keys[pygame.K_DOWN]:
+            self.facing_y = 1
+            self.crouching = True
+
+        if self.crouching and self.on_ground:
+            self.rect.height = 28
+        else:
+            self.rect.height = 42
+
+        self.vy += GRAVITY
+        self.vy = min(self.vy, 15)
+
+        self.move_horizontal(tiles)
+        self.move_vertical(tiles)
+
+        if self.invincible > 0:
+            self.invincible -= 1
+
+        if self.attack_cooldown > 0:
+            self.attack_cooldown -= 1
+
+        self.animation_time += 1
+
+    def jump(self):
+        if self.on_ground and not self.crouching:
+            self.vy = -self.jump_power - self.jump_bonus
+            self.on_ground = False
+
+    def damage_player(self, amount=1):
+        if self.invincible <= 0:
+            self.health -= amount
+            self.invincible = 90
+
+    def draw(self, camera):
+        rect = camera.apply(self.rect)
+
+        if self.invincible and self.invincible % 10 < 5:
+            return
+
+        if ASSETS.player:
+            image = ASSETS.player
+
+            if self.facing < 0:
+                image = pygame.transform.flip(image, True, False)
+
+            if self.crouching:
+                image = pygame.transform.scale(
+                    image,
+                    (32, 28)
                 )
 
-                pygame.draw.rect(screen, color, tile)
+            screen.blit(image, rect)
 
-            else:
-                pygame.draw.rect(screen, theme["wall"], tile)
-                pygame.draw.rect(screen, theme["edge"], tile, 2)
+        else:
+            color = (60, 145, 255)
 
-                if kind == "T":
-                    pygame.draw.rect(
-                        screen,
-                        (75, 45, 25),
-                        (tile.centerx - 5, tile.y + 20, 10, 18)
-                    )
+            pygame.draw.rect(screen, color, rect)
 
-                    pygame.draw.circle(
-                        screen,
-                        (25, 100, 45),
-                        (tile.centerx, tile.y + 15),
-                        17
-                    )
+            pygame.draw.rect(
+                screen,
+                (230, 240, 255),
+                (rect.x + 5, rect.y + 6, 22, 12)
+            )
 
-                elif kind == "C":
-                    pygame.draw.rect(
-                        screen,
-                        (35, 125, 65),
-                        (tile.centerx - 5, tile.y + 8, 10, 28),
-                        border_radius=4
-                    )
+            eye_x = rect.x + 7 if self.facing < 0 else rect.x + 20
 
-                elif kind == "R":
-                    pygame.draw.ellipse(
-                        screen,
-                        (100, 105, 115),
-                        (tile.x + 5, tile.y + 7, 30, 28)
-                    )
+            pygame.draw.rect(
+                screen,
+                BLACK,
+                (eye_x, rect.y + 9, 5, 5)
+            )
 
-                elif kind == "B":
-                    pygame.draw.circle(
-                        screen,
-                        (35, 115, 55),
-                        tile.center,
-                        14
-                    )
+            pygame.draw.rect(
+                screen,
+                (30, 60, 130),
+                (rect.x + 4, rect.bottom - 8, 8, 8)
+            )
 
-                elif kind == "W":
-                    pygame.draw.rect(
-                        screen,
-                        (35, 115, 190),
-                        (tile.x + 3, tile.y + 5, 34, 30),
-                        border_radius=8
-                    )
-
-                elif kind == "I":
-                    pygame.draw.polygon(
-                        screen,
-                        (175, 230, 255),
-                        [
-                            (tile.centerx, tile.y + 3),
-                            (tile.x + 8, tile.y + 30),
-                            (tile.centerx, tile.y + 25),
-                            (tile.right - 8, tile.y + 30)
-                        ]
-                    )
-
-                elif kind == "P":
-                    pygame.draw.rect(
-                        screen,
-                        (155, 145, 120),
-                        (tile.x + 8, tile.y + 5, 24, 30)
-                    )
+            pygame.draw.rect(
+                screen,
+                (30, 60, 130),
+                (rect.right - 12, rect.bottom - 8, 8, 8)
+            )
 
 
-# ==================================================
-# PLAYER DRAWING
-# ==================================================
+class Projectile:
+    def __init__(self, x, y, vx, vy, kind, damage=1):
+        self.x = float(x)
+        self.y = float(y)
 
-def draw_player(rect, direction):
-    pygame.draw.ellipse(
-        screen,
-        (8, 10, 18),
-        (rect.x - 3, rect.bottom - 4, rect.w + 6, 9)
-    )
+        self.vx = vx
+        self.vy = vy
 
-    # Legs
-    pygame.draw.rect(
-        screen,
-        (29, 38, 64),
-        (rect.x + 5, rect.bottom - 9, 8, 10),
-        border_radius=3
-    )
+        self.kind = kind
+        self.damage = damage
 
-    pygame.draw.rect(
-        screen,
-        (29, 38, 64),
-        (rect.right - 13, rect.bottom - 9, 8, 10),
-        border_radius=3
-    )
+        self.rect = pygame.Rect(x, y, 16, 16)
+        self.life = 180
 
-    # Armor
-    pygame.draw.rect(
-        screen,
-        BLUE,
-        (rect.x + 3, rect.y + 11, rect.w - 6, rect.h - 12),
-        border_radius=6
-    )
+    def update(self):
+        self.x += self.vx
+        self.y += self.vy
 
-    pygame.draw.rect(
-        screen,
-        (145, 210, 255),
-        (rect.x + 6, rect.y + 14, rect.w - 12, 6),
-        border_radius=2
-    )
+        self.rect.center = (int(self.x), int(self.y))
+        self.life -= 1
 
-    # Helmet
-    pygame.draw.rect(
-        screen,
-        (194, 207, 230),
-        (rect.x + 5, rect.y + 1, rect.w - 10, 15),
-        border_radius=5
-    )
+    def draw(self, camera):
+        rect = camera.apply(self.rect)
 
-    pygame.draw.rect(
-        screen,
-        (76, 94, 134),
-        (rect.x + 4, rect.y + 8, rect.w - 8, 5)
-    )
+        colors = {
+            "arrow": (220, 190, 120),
+            "fire": (255, 100, 20),
+            "poison": (100, 255, 70),
+            "magic": (180, 80, 255)
+        }
 
-    # Eyes
-    if direction == 0:
-        eye_x = rect.centerx + 5
-        eye_y = rect.y + 7
-    elif direction == 1:
-        eye_x = rect.centerx - 7
-        eye_y = rect.y + 7
-    elif direction == 2:
-        eye_x = rect.centerx - 2
-        eye_y = rect.y + 3
-    else:
-        eye_x = rect.centerx - 2
-        eye_y = rect.y + 10
+        color = colors.get(self.kind, WHITE)
 
-    pygame.draw.rect(
-        screen,
-        (20, 28, 45),
-        (eye_x, eye_y, 4, 3)
-    )
+        pygame.draw.circle(screen, color, rect.center, 8)
 
-    # Sword
-    if direction == 0:
-        pygame.draw.rect(
+        if self.kind == "fire":
+            pygame.draw.circle(screen, YELLOW, rect.center, 4)
+
+        elif self.kind == "poison":
+            pygame.draw.circle(screen, (50, 160, 20), rect.center, 3)
+
+
+class PoisonCloud:
+    def __init__(self, x, y):
+        self.rect = pygame.Rect(x, y, 70, 24)
+        self.timer = 240
+
+    def update(self):
+        self.timer -= 1
+
+    def draw(self, camera):
+        rect = camera.apply(self.rect)
+
+        pygame.draw.ellipse(
             screen,
-            CYAN,
-            (rect.right - 1, rect.y + 17, 14, 4),
-            border_radius=2
-        )
-        pygame.draw.rect(
-            screen,
-            GOLD,
-            (rect.right - 3, rect.y + 14, 4, 10)
+            (75, 180, 35),
+            rect
         )
 
-    elif direction == 1:
-        pygame.draw.rect(
+        pygame.draw.ellipse(
             screen,
-            CYAN,
-            (rect.left - 13, rect.y + 17, 14, 4),
-            border_radius=2
-        )
-        pygame.draw.rect(
-            screen,
-            GOLD,
-            (rect.left - 1, rect.y + 14, 4, 10)
-        )
-
-    elif direction == 2:
-        pygame.draw.rect(
-            screen,
-            CYAN,
-            (rect.centerx - 2, rect.top - 15, 4, 17),
-            border_radius=2
-        )
-        pygame.draw.rect(
-            screen,
-            GOLD,
-            (rect.centerx - 5, rect.top - 2, 10, 4)
-        )
-
-    elif direction == 3:
-        pygame.draw.rect(
-            screen,
-            CYAN,
-            (rect.centerx - 2, rect.bottom - 2, 4, 17),
-            border_radius=2
-        )
-        pygame.draw.rect(
-            screen,
-            GOLD,
-            (rect.centerx - 5, rect.bottom - 3, 10, 4)
+            (130, 255, 60),
+            (
+                rect.x + 12,
+                rect.y + 5,
+                25,
+                12
+            )
         )
 
 
-# ==================================================
-# ENEMY DRAWING
-# ==================================================
+class Enemy:
+    TYPES = (
+        "slime",
+        "archer",
+        "mage",
+        "poison",
+        "jumper",
+        "brute"
+    )
 
-def draw_monster(enemy):
-    rect = enemy["rect"]
-    kind = enemy["kind"]
-
-    colors = {
-        "slime": (45, 190, 100),
-        "skeleton": (210, 210, 220),
-        "demon": (130, 30, 55),
-        "ghost": (175, 210, 255),
-        "orc": (90, 130, 45),
-        "archer": (70, 100, 160),
-        "fire_mage": (110, 35, 150),
-        "jumper": (190, 90, 35),
-        "brute": (80, 80, 90)
+    COLORS = {
+        "slime": (70, 220, 90),
+        "archer": (175, 135, 90),
+        "mage": (170, 70, 240),
+        "poison": (100, 220, 35),
+        "jumper": (255, 145, 40),
+        "brute": (150, 55, 55)
     }
 
-    pygame.draw.ellipse(
-        screen,
-        (8, 10, 18),
-        (rect.x - 3, rect.bottom - 4, rect.w + 6, 9)
-    )
+    def __init__(self, x, y, kind, level):
+        self.kind = kind
 
-    pygame.draw.rect(
-        screen,
-        colors.get(kind, RED),
-        rect,
-        border_radius=8
-    )
+        sizes = {
+            "slime": (32, 28),
+            "archer": (30, 42),
+            "mage": (32, 42),
+            "poison": (32, 42),
+            "jumper": (32, 38),
+            "brute": (46, 50)
+        }
 
-    eye_color = GOLD if kind == "demon" else RED
+        self.rect = pygame.Rect(
+            x,
+            y,
+            *sizes.get(kind, (32, 32))
+        )
 
-    pygame.draw.circle(
-        screen,
-        eye_color,
-        (rect.x + 9, rect.y + 12),
-        3
-    )
+        self.x = float(x)
+        self.y = float(y)
 
-    pygame.draw.circle(
-        screen,
-        eye_color,
-        (rect.right - 9, rect.y + 12),
-        3
-    )
+        self.level = level
+        self.health = 2 + level // 3
+        self.max_health = self.health
 
-    # Health bar
-    pygame.draw.rect(
-        screen,
-        (50, 20, 30),
-        (rect.x, rect.y - 7, rect.w, 4)
-    )
+        self.speed = 1.2 + level * 0.04
+        self.direction = random.choice((-1, 1))
 
-    current_w = int(rect.w * enemy["hp"] / enemy["max_hp"])
+        self.timer = random.randint(60, 130)
+        self.vy = 0
 
-    pygame.draw.rect(
-        screen,
-        GREEN,
-        (rect.x, rect.y - 7, current_w, 4)
-    )
+        self.points = 50 + level * 5
+        self.dead = False
+
+    def attack(self, player, projectiles, clouds):
+        distance = player.rect.centerx - self.rect.centerx
+        vertical_distance = player.rect.centery - self.rect.centery
+
+        self.timer -= 1
+
+        if self.kind == "slime":
+            if abs(distance) < 450:
+                self.direction = 1 if distance > 0 else -1
+                self.x += self.direction * self.speed
+
+        elif self.kind == "archer":
+            if abs(distance) < 600 and self.timer <= 0:
+                direction = 1 if distance > 0 else -1
+
+                projectiles.append(
+                    Projectile(
+                        self.rect.centerx,
+                        self.rect.centery,
+                        direction * 5,
+                        0,
+                        "arrow"
+                    )
+                )
+
+                self.timer = 120
+
+        elif self.kind == "mage":
+            if abs(distance) < 650 and self.timer <= 0:
+                direction = 1 if distance > 0 else -1
+
+                projectiles.append(
+                    Projectile(
+                        self.rect.centerx,
+                        self.rect.centery,
+                        direction * 4,
+                        random.choice((-1, 0, 1)),
+                        "fire",
+                        2
+                    )
+                )
+
+                self.timer = 150
+
+        elif self.kind == "poison":
+            if abs(distance) < 420 and self.timer <= 0:
+                clouds.append(
+                    PoisonCloud(
+                        self.rect.centerx - 35,
+                        self.rect.bottom - 15
+                    )
+                )
+
+                self.timer = 180
+
+        elif self.kind == "jumper":
+            if abs(distance) < 500:
+                self.direction = 1 if distance > 0 else -1
+
+                if self.rect.bottom >= 620:
+                    self.vy = -12
+
+                self.x += self.direction * self.speed * 1.5
+
+                self.vy += GRAVITY
+                self.y += self.vy
+
+                if self.y + self.rect.height >= 620:
+                    self.y = 620 - self.rect.height
+                    self.vy = 0
+
+        elif self.kind == "brute":
+            if abs(distance) < 350:
+                self.direction = 1 if distance > 0 else -1
+                self.x += self.direction * self.speed * 0.5
+
+        self.rect.x = int(self.x)
+        self.rect.y = int(self.y)
+
+    def draw(self, camera):
+        rect = camera.apply(self.rect)
+
+        image = getattr(ASSETS, self.kind, None)
+
+        if image:
+            if self.direction < 0:
+                image = pygame.transform.flip(image, True, False)
+
+            screen.blit(image, rect)
+
+        else:
+            pygame.draw.rect(
+                screen,
+                self.COLORS[self.kind],
+                rect
+            )
+
+            pygame.draw.rect(
+                screen,
+                WHITE,
+                (rect.x + 5, rect.y + 6, 7, 7)
+            )
+
+            pygame.draw.rect(
+                screen,
+                WHITE,
+                (rect.right - 12, rect.y + 6, 7, 7)
+            )
+
+        pygame.draw.rect(
+            screen,
+            RED,
+            (rect.x, rect.y - 8, rect.width, 5)
+        )
+
+        health_width = int(
+            rect.width * self.health / max(1, self.max_health)
+        )
+
+        pygame.draw.rect(
+            screen,
+            GREEN,
+            (rect.x, rect.y - 8, health_width, 5)
+        )
 
 
-# ==================================================
-# LEVEL CREATION
-# ==================================================
+class Ability:
+    DATA = [
+        ("Strong Attack", "Increase damage", 100, "damage"),
+        ("Fast Movement", "Increase speed", 80, "speed"),
+        ("Extra Health", "Increase maximum health", 120, "health"),
+        ("High Jump", "Jump higher", 90, "jump"),
+        ("Quick Attack", "Attack faster", 110, "attack"),
+        ("Coin Bonus", "Gain extra coins", 70, "coins"),
+        ("Shield", "Increase protection", 130, "shield")
+    ]
 
-def random_open_tile(occupied, reachable):
-    tiles = list(reachable)
-    random.shuffle(tiles)
+    @classmethod
+    def choices(cls):
+        return random.sample(cls.DATA, 3)
 
-    for x, y in tiles:
-        rect = pygame.Rect(
-            x * TILE + 7,
-            y * TILE + 7,
-            26,
+    @staticmethod
+    def apply(player, ability):
+        name, description, cost, kind = ability
+
+        if kind == "damage":
+            player.damage += 1
+
+        elif kind == "speed":
+            player.speed += 1
+
+        elif kind == "health":
+            player.max_health += 1
+            player.health += 1
+
+        elif kind == "jump":
+            player.jump_bonus += 2
+
+        elif kind == "attack":
+            player.attack_cooldown = max(
+                0,
+                player.attack_cooldown - 5
+            )
+
+        elif kind == "coins":
+            player.coins += 10
+
+        elif kind == "shield":
+            player.invincible = max(
+                player.invincible,
+                120
+            )
+
+
+class Level:
+    def __init__(self, number):
+        self.number = number
+        self.width = 4200 + number * 350
+        self.height = 900
+
+        self.tiles = []
+        self.enemies = []
+        self.coins = []
+        self.projectiles = []
+        self.clouds = []
+        self.particles = []
+
+        self.key = pygame.Rect(
+            self.width - 450,
+            560,
+            28,
             28
         )
 
-        if any(rect.colliderect(other) for other in occupied):
-            continue
-
-        return rect
-
-    return pygame.Rect(12 * TILE, 7 * TILE, 26, 28)
-
-
-def create_level(stage):
-    global enemies, coins, bullets
-    global enemy_projectiles, warning_zones
-    global key_rect, exit_rect
-
-    bullets = []
-    enemies = []
-    coins = []
-
-    enemy_projectiles = []
-    warning_zones = []
-
-    reachable = make_map(stage)
-
-    exit_rect = pygame.Rect(
-        (COLS - 3) * TILE,
-        (ROWS - 3) * TILE,
-        TILE,
-        TILE
-    )
-
-    possible_keys = list(
-        reachable - {
-            (2, 2),
-            (COLS - 3, ROWS - 3)
-        }
-    )
-
-    key_tile = random.choice(possible_keys)
-
-    key_rect = pygame.Rect(
-        key_tile[0] * TILE + 10,
-        key_tile[1] * TILE + 10,
-        20,
-        20
-    )
-
-    occupied = [
-        pygame.Rect(2 * TILE, 2 * TILE, 55, 60),
-        exit_rect,
-        key_rect
-    ]
-
-    if stage <= 3:
-        available = ["slime", "skeleton"]
-
-    elif stage <= 6:
-        available = ["slime", "skeleton", "orc"]
-
-    elif stage <= 10:
-        available = ["skeleton", "orc", "archer"]
-
-    elif stage <= 14:
-        available = ["archer", "fire_mage", "jumper", "ghost"]
-
-    else:
-        available = [
-            "archer",
-            "fire_mage",
-            "jumper",
-            "brute",
-            "demon",
-            "orc"
-        ]
-
-    enemy_count = min(3 + stage, 15)
-
-    enemy_speed = 55 + stage * 3
-    enemy_hp = 1 + (stage - 1) // 4
-
-    for _ in range(enemy_count):
-        er = random_open_tile(occupied, reachable)
-        occupied.append(er)
-
-        kind = random.choice(available)
-
-        enemies.append({
-            "rect": er,
-            "hp": enemy_hp,
-            "max_hp": enemy_hp,
-            "speed": enemy_speed + random.randint(-8, 12),
-            "kind": kind,
-            "path_timer": random.random(),
-            "path": [],
-            "attack_cd": random.uniform(1.5, 3.5)
-        })
-
-    for _ in range(5 + stage // 2):
-        coin_rect = random_open_tile(occupied, reachable)
-
-        coin_rect = pygame.Rect(
-            coin_rect.x + 6,
-            coin_rect.y + 6,
-            14,
-            14
+        self.exit = pygame.Rect(
+            self.width - 120,
+            520,
+            60,
+            100
         )
 
-        occupied.append(coin_rect)
-        coins.append(coin_rect)
+        self.generate()
 
-    # Choose an ability at the beginning of the level
-    prepare_ability_selection()
-
-
-# ==================================================
-# ENEMY MOVEMENT
-# ==================================================
-
-def update_enemy_path(enemy, dt):
-    enemy["path_timer"] -= dt
-
-    if enemy["path_timer"] <= 0:
-        enemy["path_timer"] = 0.30
-
-        start = (
-            enemy["rect"].centerx // TILE,
-            enemy["rect"].centery // TILE
-        )
-
-        goal = (
-            player.centerx // TILE,
-            player.centery // TILE
-        )
-
-        enemy["path"] = find_path(start, goal)
-
-    path = enemy.get("path", [])
-
-    if not path:
-        return
-
-    target_x = path[0][0] * TILE + TILE // 2
-    target_y = path[0][1] * TILE + TILE // 2
-
-    vx = target_x - enemy["rect"].centerx
-    vy = target_y - enemy["rect"].centery
-
-    distance = math.hypot(vx, vy)
-
-    if distance < 4:
-        enemy["path"] = path[1:]
-        return
-
-    speed = enemy["speed"]
-
-    move_solid(
-        enemy["rect"],
-        vx / distance * speed * dt,
-        vy / distance * speed * dt
-    )
-
-
-# ==================================================
-# DAMAGE
-# ==================================================
-
-def damage_player(amount=1):
-    global lives, damage_timer, game_state
-
-    if damage_timer > 0:
-        return
-
-    lives -= amount
-    damage_timer = 1.2
-
-    if lives <= 0:
-        lives = 0
-        game_state = "lost"
-
-
-# ==================================================
-# ENEMY ATTACKS
-# ==================================================
-
-def enemy_attack(enemy):
-    kind = enemy["kind"]
-    rect = enemy["rect"]
-
-    if kind == "archer":
-        dx = player.centerx - rect.centerx
-        dy = player.centery - rect.centery
-
-        distance = max(1, math.hypot(dx, dy))
-
-        enemy_projectiles.append({
-            "x": rect.centerx,
-            "y": rect.centery,
-            "dx": dx / distance * 230,
-            "dy": dy / distance * 230,
-            "type": "arrow"
-        })
-
-    elif kind == "fire_mage":
-        target = pygame.Rect(
-            (player.centerx // TILE) * TILE,
-            (player.centery // TILE) * TILE,
-            TILE,
-            TILE
-        )
-
-        warning_zones.append({
-            "rect": target,
-            "timer": 0.75,
-            "type": "fire"
-        })
-
-    elif kind == "jumper":
-        target = pygame.Rect(
-            (player.centerx // TILE) * TILE,
-            (player.centery // TILE) * TILE,
-            TILE,
-            TILE
-        )
-
-        warning_zones.append({
-            "rect": target,
-            "timer": 0.85,
-            "type": "jump"
-        })
-
-    elif kind == "brute":
-        if rect.inflate(35, 35).colliderect(player):
-            damage_player()
-
-    elif kind == "demon":
-        dx = player.centerx - rect.centerx
-        dy = player.centery - rect.centery
-
-        distance = max(1, math.hypot(dx, dy))
-
-        enemy_projectiles.append({
-            "x": rect.centerx,
-            "y": rect.centery,
-            "dx": dx / distance * 180,
-            "dy": dy / distance * 180,
-            "type": "fireball"
-        })
-
-
-def update_enemy_attacks(dt):
-    for enemy in enemies:
-        enemy["attack_cd"] -= dt
-
-        if enemy["attack_cd"] <= 0:
-            enemy_attack(enemy)
-
-            cooldown = max(0.65, 3.0 - level * 0.09)
-
-            enemy["attack_cd"] = random.uniform(
-                cooldown,
-                cooldown + 1.0
+    def generate(self):
+        for x in range(0, self.width, TILE):
+            self.tiles.append(
+                Tile(x, 620, "ground")
             )
 
-    for projectile in enemy_projectiles[:]:
-        projectile["x"] += projectile["dx"] * dt
-        projectile["y"] += projectile["dy"] * dt
+        for index in range(20 + self.number):
+            x = random.randint(250, self.width - 350)
+            y = random.randint(330, 520)
+            length = random.randint(3, 6)
 
-        projectile_rect = pygame.Rect(
-            int(projectile["x"] - 6),
-            int(projectile["y"] - 6),
-            12,
-            12
-        )
-
-        if projectile_rect.colliderect(player):
-            damage_player()
-            enemy_projectiles.remove(projectile)
-            continue
-
-        if (
-            projectile["x"] < 0
-            or projectile["x"] > WIDTH
-            or projectile["y"] < 0
-            or projectile["y"] > ROWS * TILE
-        ):
-            enemy_projectiles.remove(projectile)
-
-    for warning in warning_zones[:]:
-        warning["timer"] -= dt
-
-        if warning["timer"] <= 0:
-            if warning["rect"].colliderect(player):
-                damage_player()
-
-            warning_zones.remove(warning)
-
-
-# ==================================================
-# GAME STATE
-# ==================================================
-
-def restart_at_checkpoint():
-    global level, lives, has_key, game_state
-    global shoot_timer, damage_timer
-
-    level = checkpoint
-
-    lives = min(3, abilities["max_lives"])
-    has_key = False
-    game_state = "playing"
-
-    player.x = 2 * TILE + 8
-    player.y = 2 * TILE + 8
-
-    shoot_timer = 0
-    damage_timer = 0
-
-    create_level(level)
-
-
-def start_new_run():
-    global level, checkpoint, lives, score
-    global has_key, game_state, facing
-
-    level = 1
-    checkpoint = 1
-    lives = 3
-    score = 0
-    has_key = False
-    game_state = "playing"
-    facing = 0
-
-    abilities["damage"] = 1
-    abilities["speed"] = 235
-    abilities["fire_rate"] = 0.20
-    abilities["multishot"] = 1
-    abilities["max_lives"] = 3
-
-    save_game()
-    restart_at_checkpoint()
-
-
-def save_checkpoint_if_needed():
-    global checkpoint
-
-    if level in (6, 11, 16):
-        checkpoint = level
-        save_game()
-
-
-# ==================================================
-# FIRST LEVEL
-# ==================================================
-
-create_level(level)
-
-# ==================================================
-# MAIN LOOP
-# ==================================================
-
-while True:
-    dt = clock.tick(FPS) / 1000
-
-    # EVENTS
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            pygame.quit()
-            sys.exit()
-
-        if event.type == pygame.KEYDOWN:
-
-            if event.key == pygame.K_ESCAPE:
-                pygame.quit()
-                sys.exit()
-
-            if game_state == "choosing":
-                if event.key == pygame.K_1:
-                    choose_ability(0)
-
-                elif event.key == pygame.K_2:
-                    choose_ability(1)
-
-                elif event.key == pygame.K_3:
-                    choose_ability(2)
-
-                elif event.key == pygame.K_RETURN:
-                    game_state = "playing"
-
-            if (
-                event.key == pygame.K_r
-                and game_state in ("lost", "won_all")
-            ):
-                start_new_run()
-
-            if event.key == pygame.K_c and game_state == "lost":
-                restart_at_checkpoint()
-
-            # Shoot in the direction player is facing
-            if (
-                event.key == pygame.K_SPACE
-                and game_state == "playing"
-                and shoot_timer <= 0
-            ):
-
-                for shot in range(abilities["multishot"]):
-                    bullet = pygame.Rect(
-                        player.centerx - 6,
-                        player.centery - 4,
-                        16,
-                        8
+            for part in range(length):
+                self.tiles.append(
+                    Tile(
+                        x + part * TILE,
+                        y,
+                        "platform"
                     )
+                )
 
-                    if facing == 0:
-                        bullet.center = (
-                            player.right + 8,
-                            player.centery
-                        )
-                        dx, dy = 9, 0
+        for index in range(self.width // 250):
+            x = random.randint(0, self.width - TILE)
 
-                    elif facing == 1:
-                        bullet.center = (
-                            player.left - 8,
-                            player.centery
-                        )
-                        dx, dy = -9, 0
-
-                    elif facing == 2:
-                        bullet.center = (
-                            player.centerx,
-                            player.top - 8
-                        )
-                        dx, dy = 0, -9
-
-                    else:
-                        bullet.center = (
-                            player.centerx,
-                            player.bottom + 8
-                        )
-                        dx, dy = 0, 9
-
-                    bullets.append({
-                        "rect": bullet,
-                        "dx": dx,
-                        "dy": dy
-                    })
-
-                shoot_timer = abilities["fire_rate"]
-
-    # ==================================================
-    # UPDATE
-    # ==================================================
-
-    if game_state == "playing":
-
-        shoot_timer = max(0, shoot_timer - dt)
-        damage_timer = max(0, damage_timer - dt)
-
-        keys = pygame.key.get_pressed()
-
-        dx = int(
-            keys[pygame.K_d] or keys[pygame.K_RIGHT]
-        ) - int(
-            keys[pygame.K_a] or keys[pygame.K_LEFT]
-        )
-
-        dy = int(
-            keys[pygame.K_s] or keys[pygame.K_DOWN]
-        ) - int(
-            keys[pygame.K_w] or keys[pygame.K_UP]
-        )
-
-        # Direction follows movement
-        if dx > 0:
-            facing = 0
-
-        elif dx < 0:
-            facing = 1
-
-        elif dy < 0:
-            facing = 2
-
-        elif dy > 0:
-            facing = 3
-
-        if dx or dy:
-            length = math.hypot(dx, dy)
-
-            move_solid(
-                player,
-                dx / length * abilities["speed"] * dt,
-                dy / length * abilities["speed"] * dt
+            self.tiles.append(
+                Tile(x, 580, "tree")
             )
 
-        # PLAYER BULLETS
-        for bullet in bullets[:]:
-            bullet["rect"].x += bullet["dx"]
-            bullet["rect"].y += bullet["dy"]
+        for index in range(12 + self.number * 2):
+            x = random.randint(400, self.width - 250)
 
-            if (
-                bullet["rect"].right < 0
-                or bullet["rect"].left > WIDTH
-                or bullet["rect"].bottom < 0
-                or bullet["rect"].top > ROWS * TILE
-                or tile_blocked(bullet["rect"])
-            ):
-                bullets.remove(bullet)
-                continue
+            kind = random.choice(Enemy.TYPES)
 
-            hit = False
-
-            for enemy in enemies[:]:
-                if bullet["rect"].colliderect(enemy["rect"]):
-                    enemy["hp"] -= abilities["damage"]
-                    hit = True
-
-                    if enemy["hp"] <= 0:
-                        enemies.remove(enemy)
-
-                        score += 50 + level * 5
-                        best_score = max(best_score, score)
-
-                        if random.random() < 0.6:
-                            coins.append(pygame.Rect(
-                                enemy["rect"].centerx - 7,
-                                enemy["rect"].centery - 7,
-                                14,
-                                14
-                            ))
-
-                    break
-
-            if hit and bullet in bullets:
-                bullets.remove(bullet)
-
-        # ENEMY MOVEMENT
-        for enemy in enemies:
-            update_enemy_path(enemy, dt)
-
-        # ENEMY ATTACKS
-        update_enemy_attacks(dt)
-
-        # CONTACT DAMAGE
-        for enemy in enemies:
-            if player.colliderect(enemy["rect"]):
-                if damage_timer <= 0:
-                    damage_player()
-
-                    vx = player.centerx - enemy["rect"].centerx
-                    vy = player.centery - enemy["rect"].centery
-
-                    distance = max(1, math.hypot(vx, vy))
-
-                    player.x += int(vx / distance * 30)
-                    player.y += int(vy / distance * 30)
-
-                    player.clamp_ip(pygame.Rect(
-                        TILE,
-                        TILE,
-                        WIDTH - TILE * 2,
-                        ROWS * TILE - TILE * 2
-                    ))
-
-        # KEY
-        if not has_key and player.colliderect(key_rect):
-            has_key = True
-            score += 100
-
-        # COINS
-        for coin in coins[:]:
-            if player.colliderect(coin):
-                coins.remove(coin)
-                score += 10
-
-        # EXIT
-        if (
-            player.colliderect(exit_rect)
-            and has_key
-            and not enemies
-        ):
-
-            if level >= 20:
-                game_state = "won_all"
-
-                best_level = 20
-                best_score = max(best_score, score)
-
-                save_game()
-
-            else:
-                level += 1
-
-                best_level = max(best_level, level)
-
-                has_key = False
-                lives = min(abilities["max_lives"], lives + 1)
-
-                player.x = 2 * TILE + 8
-                player.y = 2 * TILE + 8
-
-                create_level(level)
-
-                save_checkpoint_if_needed()
-                save_game()
-
-    # ==================================================
-    # DRAW
-    # ==================================================
-
-    draw_map()
-
-    # EXIT
-    pygame.draw.rect(
-        screen,
-        (75, 45, 35),
-        exit_rect,
-        border_radius=5
-    )
-
-    exit_color = GREEN if has_key and not enemies else RED
-
-    pygame.draw.rect(
-        screen,
-        exit_color,
-        (
-            exit_rect.x + 7,
-            exit_rect.y + 5,
-            26,
-            30
-        ),
-        border_radius=4
-    )
-
-    pygame.draw.circle(
-        screen,
-        GOLD,
-        (exit_rect.right - 10, exit_rect.centery),
-        3
-    )
-
-    # KEY
-    if not has_key:
-        pygame.draw.circle(screen, GOLD, key_rect.center, 10)
-        pygame.draw.circle(screen, (255, 240, 160), key_rect.center, 4)
-
-        pygame.draw.rect(
-            screen,
-            GOLD,
-            (
-                key_rect.centerx + 6,
-                key_rect.centery - 2,
-                10,
-                4
+            self.enemies.append(
+                Enemy(x, 580, kind, self.number)
             )
-        )
 
+        for index in range(25):
+            x = random.randint(150, self.width - 200)
+            y = random.choice((430, 480, 540, 570))
+
+            self.coins.append(Coin(x, y))
+
+
+class HUD:
+    def __init__(self):
+        self.font = FONT
+
+    def draw(self, game):
         pygame.draw.rect(
             screen,
-            GOLD,
-            (
-                key_rect.centerx + 12,
-                key_rect.centery - 2,
-                3,
-                7
-            )
+            (18, 24, 35),
+            (0, 0, WIDTH, 80)
         )
 
-    # COINS
-    for coin in coins:
-        pygame.draw.circle(screen, GOLD, coin.center, 8)
-        pygame.draw.circle(screen, (255, 240, 160), coin.center, 3)
-
-    # PLAYER BULLETS
-    for bullet in bullets:
-        pygame.draw.rect(
+        text(
             screen,
-            CYAN,
-            bullet["rect"],
-            border_radius=4
+            f"LEVEL {game.level.number}",
+            20,
+            12,
+            YELLOW
         )
 
-    # ENEMY PROJECTILES
-    for projectile in enemy_projectiles:
-        color = (
-            (220, 220, 230)
-            if projectile["type"] == "arrow"
-            else ORANGE
-        )
-
-        pygame.draw.circle(
+        text(
             screen,
-            color,
-            (int(projectile["x"]), int(projectile["y"])),
-            7
+            f"SCORE {game.score}",
+            210,
+            12,
+            GREEN
         )
 
-    # WARNING ZONES
-    for warning in warning_zones:
-        rect = warning["rect"]
-
-        pygame.draw.rect(screen, (210, 30, 40), rect)
-        pygame.draw.rect(screen, (255, 100, 100), rect, 3)
-
-        bar_width = int(TILE * warning["timer"] / 0.85)
-
-        pygame.draw.rect(
+        text(
             screen,
+            f"COINS {game.player.coins}",
+            410,
+            12,
+            YELLOW
+        )
+
+        text(
+            screen,
+            f"HP {game.player.health}/{game.player.max_health}",
+            620,
+            12,
+            RED
+        )
+
+        text(
+            screen,
+            "ARROWS: MOVE | UP: JUMP | DOWN: CROUCH | X: ATTACK",
+            20,
+            48,
             WHITE,
-            (rect.x, rect.y, bar_width, 5)
+            SMALL
         )
 
-    # ENEMIES
-    for enemy in enemies:
-        draw_monster(enemy)
 
-    # PLAYER
-    if damage_timer <= 0 or int(damage_timer * 12) % 2 == 0:
-        draw_player(player, facing)
-
-    # ==================================================
-    # HUD
-    # ==================================================
-
-    hud_y = ROWS * TILE
-
-    pygame.draw.rect(
-        screen,
-        (17, 20, 34),
-        (0, hud_y, WIDTH, HUD_H)
-    )
-
-    pygame.draw.line(
-        screen,
-        (100, 110, 160),
-        (0, hud_y),
-        (WIDTH, hud_y),
-        3
-    )
-
-    draw_text(
-        f"LEVEL {level}/20",
-        FONT,
-        CYAN,
-        18,
-        hud_y + 12
-    )
-
-    draw_text(
-        f"SCORE {score}",
-        FONT,
-        GOLD,
-        190,
-        hud_y + 12
-    )
-
-    draw_text(
-        f"LIVES {lives}",
-        FONT,
-        RED,
-        370,
-        hud_y + 12
-    )
-
-    draw_text(
-        f"KEY {'YES' if has_key else 'NO'}",
-        FONT,
-        GREEN if has_key else WHITE,
-        530,
-        hud_y + 12
-    )
-
-    draw_text(
-        f"MAP: {current_theme}",
-        SMALL,
-        GOLD,
-        18,
-        hud_y + 52
-    )
-
-    draw_text(
-        "WASD/ARROWS MOVE | SPACE SHOOT",
-        SMALL,
-        WHITE,
-        190,
-        hud_y + 52
-    )
-
-    draw_text(
-        f"CHECKPOINT: {checkpoint}",
-        SMALL,
-        GREEN,
-        600,
-        hud_y + 52
-    )
-
-    # ==================================================
-    # ABILITY MENU
-    # ==================================================
-
-    if game_state == "choosing":
-        draw_ability_menu()
-
-    # ==================================================
-    # END SCREENS
-    # ==================================================
-
-    if game_state in ("lost", "won_all"):
+class Menu:
+    def draw(self):
         overlay = pygame.Surface(
             (WIDTH, HEIGHT),
             pygame.SRCALPHA
         )
 
-        overlay.fill((5, 7, 15, 215))
+        overlay.fill((5, 10, 20, 220))
         screen.blit(overlay, (0, 0))
 
-        if game_state == "lost":
-            draw_text(
-                "RUN OVER",
-                BIG,
-                RED,
-                WIDTH // 2,
-                HEIGHT // 2 - 60,
-                center=True
+        centered_text(
+            screen,
+            "DUNGEON ESCAPE",
+            190,
+            YELLOW,
+            BIG
+        )
+
+        centered_text(
+            screen,
+            "ENTER  -  START",
+            320,
+            WHITE
+        )
+
+        centered_text(
+            screen,
+            "ESC  -  EXIT",
+            370,
+            WHITE
+        )
+
+
+class AbilityMenu:
+    def draw(self, game):
+        overlay = pygame.Surface(
+            (WIDTH, HEIGHT),
+            pygame.SRCALPHA
+        )
+
+        overlay.fill((5, 10, 20, 230))
+        screen.blit(overlay, (0, 0))
+
+        centered_text(
+            screen,
+            "CHOOSE YOUR ABILITY",
+            110,
+            PURPLE,
+            BIG
+        )
+
+        centered_text(
+            screen,
+            f"AVAILABLE SCORE: {game.score}",
+            190,
+            YELLOW
+        )
+
+        for index, ability in enumerate(game.abilities):
+            name, description, cost, kind = ability
+            y = 250 + index * 105
+
+            pygame.draw.rect(
+                screen,
+                (35, 45, 65),
+                (170, y, 660, 80),
+                border_radius=12
             )
 
-            draw_text(
-                f"You reached level {level}",
-                FONT,
-                WHITE,
-                WIDTH // 2,
-                HEIGHT // 2 - 12,
-                center=True
+            pygame.draw.rect(
+                screen,
+                PURPLE,
+                (170, y, 6, 80)
             )
 
-            draw_text(
-                f"Checkpoint: level {checkpoint}",
-                FONT,
-                GREEN,
-                WIDTH // 2,
-                HEIGHT // 2 + 24,
-                center=True
+            text(
+                screen,
+                f"{index + 1}. {name}",
+                200,
+                y + 10,
+                WHITE
             )
 
-            draw_text(
-                "R: New run   C: Continue checkpoint",
-                SMALL,
-                WHITE,
-                WIDTH // 2,
-                HEIGHT // 2 + 65,
-                center=True
+            text(
+                screen,
+                description,
+                200,
+                y + 42,
+                BLUE,
+                SMALL
             )
+
+            text(
+                screen,
+                f"{cost} POINTS",
+                680,
+                y + 25,
+                YELLOW
+            )
+
+        centered_text(
+            screen,
+            "0 - SKIP",
+            610,
+            WHITE
+        )
+
+
+class GameOver:
+    def draw(self, game):
+        overlay = pygame.Surface(
+            (WIDTH, HEIGHT),
+            pygame.SRCALPHA
+        )
+
+        overlay.fill((0, 0, 0, 220))
+        screen.blit(overlay, (0, 0))
+
+        centered_text(
+            screen,
+            "GAME OVER",
+            210,
+            RED,
+            BIG
+        )
+
+        centered_text(
+            screen,
+            f"FINAL SCORE: {game.score}",
+            320,
+            YELLOW
+        )
+
+        centered_text(
+            screen,
+            "ENTER - RESTART",
+            400,
+            WHITE
+        )
+
+        centered_text(
+            screen,
+            "ESC - EXIT",
+            450,
+            WHITE
+        )
+
+
+class Game:
+    def __init__(self):
+        self.player = Player()
+        self.level = Level(1)
+
+        self.camera = Camera()
+        self.hud = HUD()
+        self.menu = Menu()
+        self.ability_menu = AbilityMenu()
+        self.game_over_menu = GameOver()
+
+        self.state = "menu"
+
+        self.score = 0
+        self.has_key = False
+
+        self.abilities = Ability.choices()
+
+        self.records = load_json(
+            RECORD_PATH,
+            []
+        )
+
+        self.best = load_json(
+            SAVE_PATH,
+            {
+                "best_score": 0,
+                "best_level": 1
+            }
+        )
+
+        self.message = ""
+        self.message_timer = 0
+
+    def restart(self):
+        self.__init__()
+
+    def start_level(self):
+        self.level = Level(self.level.number + 1)
+
+        self.player.rect.x = 80
+        self.player.rect.y = 450
+
+        self.player.x = float(self.player.rect.x)
+        self.player.y = float(self.player.rect.y)
+
+        self.player.vx = 0
+        self.player.vy = 0
+
+        self.has_key = False
+        self.abilities = Ability.choices()
+
+        self.state = "ability"
+
+    def save_record(self):
+        record = {
+            "score": self.score,
+            "level": self.level.number,
+            "coins": self.player.coins
+        }
+
+        self.records.append(record)
+
+        self.records.sort(
+            key=lambda item: item["score"],
+            reverse=True
+        )
+
+        self.records = self.records[:20]
+
+        save_json(
+            RECORD_PATH,
+            self.records
+        )
+
+        if self.score > self.best["best_score"]:
+            self.best["best_score"] = self.score
+
+        if self.level.number > self.best["best_level"]:
+            self.best["best_level"] = self.level.number
+
+        save_json(
+            SAVE_PATH,
+            self.best
+        )
+
+    def shoot(self):
+        if self.player.attack_cooldown > 0:
+            return
+
+        self.player.attack_cooldown = 18
+
+        if self.player.facing_y == -1:
+            vx = 0
+            vy = -7
+
+        elif self.player.facing_y == 1:
+            vx = 0
+            vy = 7
 
         else:
-            draw_text(
-                "DUNGEON MASTER!",
-                BIG,
-                GOLD,
-                WIDTH // 2,
-                HEIGHT // 2 - 50,
-                center=True
+            vx = self.player.facing * 7
+            vy = 0
+
+        self.level.projectiles.append(
+            Projectile(
+                self.player.rect.centerx,
+                self.player.rect.centery,
+                vx,
+                vy,
+                "magic",
+                self.player.damage
+            )
+        )
+
+    def update_projectiles(self):
+        for projectile in self.level.projectiles:
+            projectile.update()
+
+            if projectile.kind != "magic":
+                if projectile.rect.colliderect(
+                    self.player.rect
+                ):
+                    self.player.damage_player()
+                    projectile.life = 0
+
+            else:
+                for enemy in self.level.enemies:
+                    if projectile.rect.colliderect(
+                        enemy.rect
+                    ):
+                        enemy.health -= projectile.damage
+                        projectile.life = 0
+
+                        if enemy.health <= 0:
+                            enemy.dead = True
+                            self.score += enemy.points
+
+                            self.level.particles.append(
+                                Particle(
+                                    enemy.rect.centerx,
+                                    enemy.rect.centery,
+                                    Enemy.COLORS[enemy.kind]
+                                )
+                            )
+
+        self.level.projectiles = [
+            projectile
+            for projectile in self.level.projectiles
+            if projectile.life > 0
+        ]
+
+    def update_clouds(self):
+        for cloud in self.level.clouds:
+            cloud.update()
+
+            if cloud.rect.colliderect(
+                self.player.rect
+            ):
+                self.player.damage_player()
+
+        self.level.clouds = [
+            cloud for cloud in self.level.clouds
+            if cloud.timer > 0
+        ]
+
+    def update_particles(self):
+        for particle in self.level.particles:
+            particle.update()
+
+        self.level.particles = [
+            particle for particle in self.level.particles
+            if particle.particles
+        ]
+
+    def update(self):
+        keys = pygame.key.get_pressed()
+
+        if self.state != "playing":
+            return
+
+        self.player.update(
+            keys,
+            self.level.tiles
+        )
+
+        if keys[pygame.K_SPACE] or keys[pygame.K_UP]:
+            if self.player.on_ground:
+                self.player.jump()
+
+        if keys[pygame.K_x]:
+            self.shoot()
+
+        for enemy in self.level.enemies:
+            enemy.attack(
+                self.player,
+                self.level.projectiles,
+                self.level.clouds
             )
 
-            draw_text(
-                "You completed all 20 levels!",
-                FONT,
-                GREEN,
-                WIDTH // 2,
-                HEIGHT // 2 + 10,
-                center=True
+            if enemy.rect.colliderect(
+                self.player.rect
+            ):
+                self.player.damage_player()
+
+        self.level.enemies = [
+            enemy for enemy in self.level.enemies
+            if not enemy.dead
+        ]
+
+        self.update_projectiles()
+        self.update_clouds()
+        self.update_particles()
+
+        for coin in self.level.coins[:]:
+            if coin.rect.colliderect(
+                self.player.rect
+            ):
+                self.level.coins.remove(coin)
+
+                self.score += 10
+                self.player.coins += 1
+
+        if self.level.key.colliderect(
+            self.player.rect
+        ):
+            if not self.has_key:
+                self.has_key = True
+                self.score += 100
+
+        if self.has_key:
+            if self.level.exit.colliderect(
+                self.player.rect
+            ):
+                self.start_level()
+
+        self.camera.follow(
+            self.player.rect,
+            self.level.width,
+            self.level.height
+        )
+
+        if self.player.health <= 0:
+            self.save_record()
+            self.state = "lost"
+
+    def draw_background(self):
+        screen.fill((105, 180, 230))
+
+        if ASSETS.background:
+            background = ASSETS.background
+
+            for x in range(
+                -int(self.camera.x * 0.25) % background.get_width(),
+                WIDTH,
+                background.get_width()
+            ):
+                screen.blit(
+                    background,
+                    (x, 80 - int(self.camera.y * 0.1))
+                )
+
+        else:
+            for index in range(7):
+                x = (
+                    index * 220
+                    - int(self.camera.x * 0.25)
+                ) % (WIDTH + 300)
+
+                pygame.draw.circle(
+                    screen,
+                    WHITE,
+                    (x, 100),
+                    35
+                )
+
+                pygame.draw.circle(
+                    screen,
+                    WHITE,
+                    (x + 35, 100),
+                    28
+                )
+
+            pygame.draw.polygon(
+                screen,
+                (75, 125, 100),
+                [
+                    (0, 580),
+                    (180, 330),
+                    (400, 580)
+                ]
             )
 
-            draw_text(
-                "Press R to start a new run",
-                SMALL,
-                WHITE,
-                WIDTH // 2,
-                HEIGHT // 2 + 55,
-                center=True
+            pygame.draw.polygon(
+                screen,
+                (65, 115, 90),
+                [
+                    (400, 580),
+                    (700, 300),
+                    (1000, 580)
+                ]
             )
 
-    pygame.display.flip()
+    def draw_world(self):
+        self.draw_background()
+
+        for tile in self.level.tiles:
+            tile.draw(self.camera)
+
+        for coin in self.level.coins:
+            coin.draw(self.camera)
+
+        if not self.has_key:
+            key_rect = self.camera.apply(self.level.key)
+
+            if ASSETS.key:
+                screen.blit(ASSETS.key, key_rect)
+            else:
+                pygame.draw.rect(
+                    screen,
+                    YELLOW,
+                    key_rect
+                )
+
+                pygame.draw.circle(
+                    screen,
+                    ORANGE,
+                    key_rect.center,
+                    6
+                )
+
+        exit_rect = self.camera.apply(self.level.exit)
+
+        exit_color = GREEN if self.has_key else RED
+
+        if ASSETS.exit:
+            screen.blit(ASSETS.exit, exit_rect)
+        else:
+            pygame.draw.rect(
+                screen,
+                exit_color,
+                exit_rect
+            )
+
+            pygame.draw.rect(
+                screen,
+                BLACK,
+                (
+                    exit_rect.x + 12,
+                    exit_rect.y + 20,
+                    30,
+                    60
+                )
+            )
+
+        for cloud in self.level.clouds:
+            cloud.draw(self.camera)
+
+        for projectile in self.level.projectiles:
+            projectile.draw(self.camera)
+
+        for enemy in self.level.enemies:
+            enemy.draw(self.camera)
+
+        for particle in self.level.particles:
+            particle.draw(self.camera)
+
+        self.player.draw(self.camera)
+
+        self.hud.draw(self)
+
+        if self.has_key:
+            text(
+                screen,
+                "KEY FOUND - REACH THE EXIT",
+                350,
+                95,
+                GREEN
+            )
+
+    def draw(self):
+        self.draw_world()
+
+        if self.state == "menu":
+            self.menu.draw()
+
+        elif self.state == "ability":
+            self.ability_menu.draw(self)
+
+        elif self.state == "lost":
+            self.game_over_menu.draw(self)
+
+        pygame.display.flip()
+
+    def handle_event(self, event):
+        if event.type != pygame.KEYDOWN:
+            return
+
+        if self.state == "menu":
+            if event.key == pygame.K_RETURN:
+                self.state = "ability"
+
+            elif event.key == pygame.K_ESCAPE:
+                pygame.quit()
+                sys.exit()
+
+        elif self.state == "ability":
+            if event.key in (
+                pygame.K_1,
+                pygame.K_2,
+                pygame.K_3
+            ):
+                index = event.key - pygame.K_1
+                ability = self.abilities[index]
+
+                if self.score >= ability[2]:
+                    self.score -= ability[2]
+                    Ability.apply(
+                        self.player,
+                        ability
+                    )
+
+                self.state = "playing"
+
+            elif event.key == pygame.K_0:
+                self.state = "playing"
+
+        elif self.state == "playing":
+            if event.key == pygame.K_ESCAPE:
+                self.state = "menu"
+
+            elif event.key == pygame.K_r:
+                self.level = Level(self.level.number)
+
+                self.player.rect.x = 80
+                self.player.rect.y = 450
+
+                self.player.x = float(self.player.rect.x)
+                self.player.y = float(self.player.rect.y)
+
+                self.player.vx = 0
+                self.player.vy = 0
+
+                self.has_key = False
+
+        elif self.state == "lost":
+            if event.key == pygame.K_RETURN:
+                self.restart()
+
+            elif event.key == pygame.K_ESCAPE:
+                pygame.quit()
+                sys.exit()
+
+    def run(self):
+        while True:
+            clock.tick(FPS)
+
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    sys.exit()
+
+                self.handle_event(event)
+
+            self.update()
+            self.draw()
+
+
+if __name__ == "__main__":
+    os.makedirs(ASSET_PATH, exist_ok=True)
+
+    game = Game()
+    game.run()
